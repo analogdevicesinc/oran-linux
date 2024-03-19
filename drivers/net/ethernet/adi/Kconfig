@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config ADRV906X_NET
+    tristate "ADRV906X Ethernet MAC support"
+    depends on ADRV906X_PHY && HAS_DMA
+    help
+      This driver supports the ADRV906X Ethernet MAC.
+      To compile this driver as a module, choose M here. The module
+      will be called adrv906x-net.

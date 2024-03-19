@@ -230,6 +230,12 @@ config DWMAC_INTEL
 	  This selects the Intel platform specific bus support for the
 	  stmmac driver. This driver is used for Intel Quark/EHL/TGL.
 
+config DWMAC_ADRV906X
+	tristate "ADRV906X 1G support"
+	depends on OF && STMMAC_PLATFORM
+	help
+	  ADRV906X 1G ethernet driver.
+
 config STMMAC_PCI
 	tristate "STMMAC PCI bus support"
 	depends on STMMAC_ETH && PCI

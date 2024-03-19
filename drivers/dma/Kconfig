@@ -710,6 +710,12 @@ config ZX_DMA
 	help
 	  Support the DMA engine for ZTE ZX family platform devices.
 
+config ADI_DMA
+    tristate "adi dma support"
+    select DMA_ENGINE
+    select DMA_VIRTUAL_CHANNELS
+    help
+      support ADI's distributed DMA engine
 
 # driver files
 source "drivers/dma/bestcomm/Kconfig"
