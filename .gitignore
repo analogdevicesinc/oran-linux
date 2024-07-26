@@ -156,3 +156,8 @@ x509.genkey
 
 # Documentation toolchain
 sphinx_*/
+
+# Yocto symlinks
+oe-logs
+oe-workdir
+
