@@ -85,6 +85,7 @@ config ADIN_PHY
 
 config ADRV906X_PHY
 	tristate "ADRV906X Gigabit Ethernet PHY driver"
+	select LED_TRIGGER_PHY
 
 config AQUANTIA_PHY
 	tristate "Aquantia PHYs"
