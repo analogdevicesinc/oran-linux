@@ -1014,6 +1014,9 @@ static int adrv906x_eth_remove(struct platform_device *pdev)
 			break;
 	}
 
+	if (es->enabled)
+		adrv906x_switch_cleanup(es);
+
 	return 0;
 }
 
