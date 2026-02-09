@@ -33,7 +33,7 @@ struct adi_sram_mmap {
 	struct reserved_mem *rmem;
 };
 
-struct address_space_operations sram_aops = {
+const struct address_space_operations sram_aops = {
 	.dirty_folio	= noop_dirty_folio,
 };
 
@@ -51,19 +51,23 @@ static int sram_mmap(struct file *fp, struct vm_area_struct *vma)
 	int ret = 0;
 
 	if ((vma->vm_pgoff * PAGE_SIZE) + sram_size > sram->rmem->size) {
-		dev_err(sram->dev, "Tried to map 0x%zx@0x%zx, only 0x%zx available\n",
+		dev_err(sram->dev, "Tried to map %zx@0x%lx, only 0x%zx available\n",
 			sram_size, vma->vm_pgoff * PAGE_SIZE, (size_t)sram->rmem->size);
 		return -ENOMEM;
 	}
 
 	if (sram_size % PAGE_SIZE) {
-		dev_err(sram->dev, "Requested mapping is not a multiple of page size, requested 0x%lx bytes\n", sram_size);
+		dev_err(sram->dev, "Requested mapping is not a multiple of page size, requested 0x%zx bytes\n", sram_size);
 		return -EINVAL;
 	}
 
 	fp->f_mapping->a_ops = &sram_aops;
+#if defined(CONFIG_ARM64)
 	vma->vm_page_prot = __pgprot_modify(vma->vm_page_prot, PTE_ATTRINDX_MASK,
 					    PTE_ATTRINDX(MT_NORMAL) | PTE_PXN | PTE_UXN);
+#else
+#warning "Unsupported architecture"
+#endif
 	vma->vm_private_data = sram;
 	vma->vm_ops = NULL;
 
@@ -133,10 +137,8 @@ static int adi_sram_mmap_probe(struct platform_device *pdev)
 		set_page_count(page + i, 1);
 
 	sram = devm_kzalloc(dev, sizeof(*sram), GFP_KERNEL);
-	if (!sram) {
-		dev_err(dev, "Unable to allocate sram device data\n");
+	if (!sram)
 		return -ENOMEM;
-	}
 
 	sram->dev = dev;
 	sram->start = page;
@@ -150,7 +152,7 @@ static int adi_sram_mmap_probe(struct platform_device *pdev)
 
 	ret = misc_register(&sram->miscdev);
 	if (ret < 0)
-		dev_err(dev, "Faied to register sram mmap misc device\n");
+		dev_err(dev, "Failed to register sram mmap misc device\n");
 
 	return ret;
 }
@@ -193,8 +195,8 @@ static int __init rmem_sram_setup(struct reserved_mem *rmem)
 	}
 
 	if (rmem->size & (PAGE_SIZE - 1)) {
-		pr_err("sram region starting at 0x%px is not a multiple of the page size (requested 0x%llx bytes)\n",
-		       (void *)rmem->base, rmem->size);
+		pr_err("sram region starting at 0x%px is not a multiple of the page size (requested 0x%zx bytes)\n",
+		       (void *)rmem->base, (size_t)rmem->size);
 		return -EINVAL;
 	}
 
@@ -204,8 +206,9 @@ static int __init rmem_sram_setup(struct reserved_mem *rmem)
 		&rmem->base, (unsigned long)(rmem->size / SZ_1K));
 	return 0;
 }
-RESERVEDMEM_OF_DECLARE(adi_sram, "adi,sram-access", rmem_sram_setup);
 
+RESERVEDMEM_OF_DECLARE(adi_sram, "adi,sram-access", rmem_sram_setup);
 module_platform_driver(adi_sram_mmap_driver);
 MODULE_DESCRIPTION("SRAM mmap misc driver for ADI processor on-chip memory");
 MODULE_LICENSE("GPL");
+

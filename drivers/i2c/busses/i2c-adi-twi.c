@@ -22,6 +22,7 @@
 #include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/clk.h>
+#include <linux/bitfield.h>
 
 #include <asm/irq.h>
 
@@ -109,6 +110,7 @@ static void i2c_adi_twi_handle_interrupt(struct adi_twi_dev *priv,
 					 bool polling)
 {
 	u16 val;
+	unsigned short mstat = ioread16(priv->base + ADI_TWI_MSTRSTAT);
 
 	if (twi_int_status & XMTSERV) {
 		/* Transmit next data */
@@ -147,20 +149,18 @@ static void i2c_adi_twi_handle_interrupt(struct adi_twi_dev *priv,
 		if (!priv->last_msg &&
 		    !priv->msg_buf &&
 		    twi_int_status & MCOMP &&
-		    val & DNAK) {
+		    mstat & DNAK) {
 			priv->result = 1;
 		} else {
-			val = ioread16(priv->base + ADI_TWI_MSTRSTAT);
-
-			if (val & LOSTARB)
+			if (mstat & LOSTARB)
 				dev_dbg(priv->dev, "lost arbitration");
-			if (val & ANAK)
+			if (mstat & ANAK)
 				dev_dbg(priv->dev, "address not acknowledged");
-			if (val & DNAK)
+			if (mstat & DNAK)
 				dev_dbg(priv->dev, "data not acknowledged");
-			if (val & BUFRDERR)
+			if (mstat & BUFRDERR)
 				dev_dbg(priv->dev, "buffer read error");
-			if (val & BUFWRERR)
+			if (mstat & BUFWRERR)
 				dev_dbg(priv->dev, "buffer write error");
 
 			priv->result = -EIO;
@@ -393,7 +393,7 @@ static int i2c_adi_twi_resume(struct device *dev)
 {
 	struct adi_twi_dev *priv = dev_get_drvdata(dev);
 
-	int ret = request_irq(priv->irq, adi_twi_interrupt_entry,
+	int ret = request_irq(priv->irq, i2c_adi_twi_interrupt_entry,
 			      0, to_platform_device(dev)->name, priv);
 
 	if (ret) {
@@ -474,10 +474,8 @@ static int i2c_adi_twi_probe(struct platform_device *pdev)
 	}
 
 	priv->irq = platform_get_irq(pdev, 0);
-	if (priv->irq < 0) {
-		dev_err(&pdev->dev, "cannot find irq");
+	if (priv->irq < 0)
 		return -ENOENT;
-	}
 
 	adap = &priv->adap;
 	adap->nr = pdev->id;

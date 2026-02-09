@@ -16,7 +16,7 @@
 #include "ptp_private.h"
 #include "ptp_adrv906x_tod.h"
 
-MODULE_DESCRIPTION("Example driver for integrating the time-of-day in adrv906x to work with a clock pll");
+MODULE_DESCRIPTION("Example driver for combining adrv906x-tod with a clk pll");
 MODULE_AUTHOR("Landau Zhang <landau.zhang@analog.com>");
 MODULE_AUTHOR("Kim Holdt <kim.holdt@analog.com>");
 MODULE_VERSION("1.0");
@@ -38,7 +38,7 @@ struct phc_pll_i2c_attr {
 struct adrv906x_hw_pll {
 	long scaled_ppm;
 	struct phc_pll_i2c_attr pll_i2c;
-	spinlock_t reg_lock;
+	spinlock_t reg_lock; /* hw access lock */
 	struct phc_pll_ops pll_ops;
 };
 
@@ -55,8 +55,8 @@ struct adrv906x_phc_pll {
 
 #define ADDR_NCO0_CENTER_FREQ_CNT               7
 
-#define ADRV906X_PHC_NCO_FREQ_TO_HZ(freq)           (freq >> 40)
-#define ADRV906X_PHC_PPB_TO_PPT(ppb)                (ppb * 1000)
+#define ADRV906X_PHC_NCO_FREQ_TO_HZ(freq)           ((freq) >> 40)
+#define ADRV906X_PHC_PPB_TO_PPT(ppb)                ((ppb) * 1000)
 
 static int adrv906x_pll_i2c_read(struct adrv906x_hw_pll *hw_pll, u16 addr, u8 *buffer, size_t len)
 {
@@ -249,14 +249,14 @@ static int adrv906x_pll_get_adapter(struct adrv906x_hw_pll *hw_pll)
 
 	i2c_pll_node = of_parse_phandle(pll_np, "adi,i2c-clk", 0);
 	if (!i2c_pll_node) {
-		dev_err(dev, "No clk node is found");
+		dev_err(dev, "no clk node is found");
 		return -EINVAL;
 	}
 	of_property_read_u32(i2c_pll_node, "reg", &hw_pll->pll_i2c.bus_addr);
 
 	i2c_mux_node = of_get_parent(i2c_pll_node);
 	if (!i2c_mux_node) {
-		dev_err(dev, "No parent device node of clk node is found");
+		dev_err(dev, "no parent device node of clk node is found");
 		of_node_put(i2c_pll_node);
 		return -EINVAL;
 	}
@@ -267,7 +267,7 @@ static int adrv906x_pll_get_adapter(struct adrv906x_hw_pll *hw_pll)
 	of_node_put(i2c_mux_node);
 
 	if (!hw_pll->pll_i2c.adpt) {
-		dev_err(dev, "No adapter of the clk node is found");
+		dev_err(dev, "no adapter of the clk node is found");
 		return -ENODEV;
 	}
 
@@ -304,7 +304,7 @@ static int adrv906x_pll_i2c_remove(struct adrv906x_hw_pll *hw_pll)
 	return 0;
 }
 
-struct phc_pll_ops adrv906x_pll_ops = {
+static struct phc_pll_ops adrv906x_pll_ops = {
 	.adjfine	= &adrv906x_pll_adjfine_ad9545,
 	.close		= &adrv906x_pll_i2c_remove,
 };
@@ -334,7 +334,7 @@ static struct ptp_clock_info adrv906x_pll_caps = {
 	.adjfine	= &adrv906x_phc_adjfine,
 };
 
-int adrv906x_phc_pll_probe(struct adrv906x_phc_pll *pll_phc)
+static int adrv906x_phc_pll_probe(struct adrv906x_phc_pll *pll_phc)
 {
 	struct adrv906x_hw_pll *hw_pll = &pll_phc->hw_pll;
 	struct device *dev = pll_phc->dev;
@@ -345,7 +345,7 @@ int adrv906x_phc_pll_probe(struct adrv906x_phc_pll *pll_phc)
 	np = dev->of_node;
 	pll_np = of_get_child_by_name(np, "clock-pll");
 	if (!pll_np) {
-		dev_err(dev, "miss clock pll device node");
+		dev_err(dev, "missing clock pll device node");
 		ret = -ENODEV;
 		goto probe_error;
 	}
@@ -354,7 +354,7 @@ int adrv906x_phc_pll_probe(struct adrv906x_phc_pll *pll_phc)
 		ret = adrv906x_pll_i2c_probe(hw_pll);
 		if (ret == -ENODEV) {
 			ret = -EPROBE_DEFER;
-			dev_err(dev, "miss i2c clock device node");
+			dev_err(dev, "missing i2c clock device node");
 			goto probe_error;
 		}
 		if (ret == 0) {
@@ -362,7 +362,7 @@ int adrv906x_phc_pll_probe(struct adrv906x_phc_pll *pll_phc)
 			goto probe_ok;
 		}
 	} else {
-		dev_err(dev, "No valid phc hardware clock chip");
+		dev_err(dev, "no valid phc hardware clock chip");
 		ret = -ENODEV;
 		goto probe_error;
 	}
@@ -372,16 +372,16 @@ probe_ok:
 		spin_lock_init(&hw_pll->reg_lock);
 probe_error:
 	if (ret == -EPROBE_DEFER)
-		dev_err(dev, "No valid phc hardware clock chip, defer probing");
+		dev_err(dev, "no valid phc hardware clock chip, defer probing");
 	else if (ret != 0)
-		dev_err(dev, "PHC pll clock probe error");
+		dev_err(dev, "phc pll clock probe error");
 	else
-		dev_info(dev, "PHC pll clock probe ok");
+		dev_info(dev, "phc pll clock probe ok");
 
 	return ret;
 }
 
-int adrv906x_pll_remove(struct adrv906x_phc_pll *pll_phc)
+static int adrv906x_pll_remove(struct adrv906x_phc_pll *pll_phc)
 {
 	struct adrv906x_hw_pll *hw_pll = &pll_phc->hw_pll;
 
@@ -423,16 +423,15 @@ err_out:
 	return ret;
 }
 
-static int adrv906x_ptp_remove(struct platform_device *pdev)
+static void adrv906x_ptp_remove(struct platform_device *pdev)
 {
 	struct adrv906x_phc_pll *pll_phc = platform_get_drvdata(pdev);
 	int ret;
 
-	ret = adrv906x_tod_remove(pdev);
+	adrv906x_tod_remove(pdev);
+	ret = adrv906x_pll_remove(pll_phc);
 	if (ret)
-		return ret;
-
-	return adrv906x_pll_remove(pll_phc);
+		dev_err(pll_phc->dev, "failed to remove pll");
 }
 
 static const struct of_device_id ptp_adrv906x_soc_of_match[] = {

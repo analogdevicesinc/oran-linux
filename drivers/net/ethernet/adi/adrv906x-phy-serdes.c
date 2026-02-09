@@ -408,17 +408,11 @@ static struct adrv906x_pll adrv906x_pll_dev[ADRV906X_PHY_MAX_PLLS] = {
 
 static struct adrv906x_serdes *adrv906x_serdes_instance_get(int dev_id)
 {
-	if (dev_id >= ADRV906X_PHY_MAX_LANES)
-		return NULL;
-
 	return &adrv906x_serdes_devs[dev_id];
 }
 
 static struct adrv906x_pll *adrv906x_pll_instance_get(int dev_id)
 {
-	if (dev_id >= ADRV906X_PHY_MAX_PLLS)
-		return NULL;
-
 	return &adrv906x_pll_dev[dev_id];
 }
 
@@ -629,8 +623,10 @@ static int __pll_cfg_done_recv(struct sk_buff *skb, struct genl_info *info)
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_PLLS)
+	if (dev_id >= ADRV906X_PHY_MAX_PLLS) {
+		pr_err("pll device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	pll = adrv906x_pll_instance_get(dev_id);
 	adrv906x_phy_fsm_trigger_transition(&pll->fsm, PLL_EVT_CFG_DONE);
@@ -649,8 +645,10 @@ static int __pll_relock_succeed_recv(struct sk_buff *skb, struct genl_info *info
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_PLLS)
+	if (dev_id >= ADRV906X_PHY_MAX_PLLS) {
+		pr_err("pll device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
@@ -674,8 +672,10 @@ static int __pll_relock_failed_recv(struct sk_buff *skb, struct genl_info *info)
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_PLLS)
+	if (dev_id >= ADRV906X_PHY_MAX_PLLS) {
+		pr_err("pll device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	pll = adrv906x_pll_instance_get(dev_id);
 	adrv906x_phy_fsm_trigger_transition(&pll->fsm, PLL_EVT_UNLOCKED);
@@ -744,8 +744,10 @@ static int __sd_ser_cfg_done_recv(struct sk_buff *skb, struct genl_info *info)
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_LANES)
+	if (dev_id >= ADRV906X_PHY_MAX_LANES) {
+		pr_err("phy device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
@@ -771,8 +773,10 @@ static int __sd_deser_cfg_done_recv(struct sk_buff *skb, struct genl_info *info)
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_LANES)
+	if (dev_id >= ADRV906X_PHY_MAX_LANES) {
+		pr_err("phy device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
@@ -795,8 +799,10 @@ static int __sd_deser_signal_ok_recv(struct sk_buff *skb, struct genl_info *info
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_LANES)
+	if (dev_id >= ADRV906X_PHY_MAX_LANES) {
+		pr_err("phy device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
@@ -828,8 +834,10 @@ static int __sd_app_pwr_down_rdy_recv(struct sk_buff *skb, struct genl_info *inf
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_LANES)
+	if (dev_id >= ADRV906X_PHY_MAX_LANES) {
+		pr_err("phy device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
@@ -855,8 +863,10 @@ static int __sd_deser_los_detected_recv(struct sk_buff *skb, struct genl_info *i
 	if (ret)
 		return ret;
 
-	if (dev_id >= ADRV906X_PHY_MAX_LANES)
+	if (dev_id >= ADRV906X_PHY_MAX_LANES) {
+		pr_err("phy device id %d not found", dev_id);
 		return -EINVAL;
+	}
 
 	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
@@ -1082,13 +1092,13 @@ static void __pll_check_actv_lnks(void *param)
 	struct adrv906x_pll *pll = container_of(fsm, struct adrv906x_pll, fsm);
 	int event = PLL_EVT_UNKNOWN;
 
-	if ((atomic_read(&fsm->state) == PLL_ST_LNK0_10G_REQ
-	     || atomic_read(&fsm->state) == PLL_ST_LNK0_25G_REQ)
-	    && adrv906x_serdes_disabled(2 * pll->dev_id + 1))
+	if ((atomic_read(&fsm->state) == PLL_ST_LNK0_10G_REQ ||
+	     atomic_read(&fsm->state) == PLL_ST_LNK0_25G_REQ) &&
+		adrv906x_serdes_disabled(2 * pll->dev_id + 1))
 		event = PLL_EVT_LNK1_DOWN;
-	else if ((atomic_read(&fsm->state) == PLL_ST_LNK1_10G_REQ
-		  || atomic_read(&fsm->state) == PLL_ST_LNK1_25G_REQ)
-		 && adrv906x_serdes_disabled(2 * pll->dev_id))
+	else if ((atomic_read(&fsm->state) == PLL_ST_LNK1_10G_REQ ||
+		  atomic_read(&fsm->state) == PLL_ST_LNK1_25G_REQ) &&
+		 adrv906x_serdes_disabled(2 * pll->dev_id))
 		event = PLL_EVT_LNK0_DOWN;
 
 	adrv906x_phy_fsm_trigger_transition(fsm, event);
@@ -1154,6 +1164,7 @@ static int adrv906x_pll_open(int dev_id)
 		ret = kfifo_alloc(&pll->fsm.event_fifo, 32, GFP_KERNEL);
 		if (ret) {
 			pr_err("failed to allocate fifo");
+			mutex_unlock(&pll->mtx);
 			return ret;
 		}
 		pll->fsm.task = kthread_run(adrv906x_phy_fsm_handle_transition,

@@ -369,7 +369,7 @@ static int adrv906x_tod_hw_op_poll_reg(struct adrv906x_tod_counter *counter, u32
 	if (!done) {
 		dev_err(counter->parent->dev,
 			"trigger operation on reg 0x%x bit(s) 0x%x missed, delay configured: %llu us",
-			regaddr, bit_mask, p_delay->ns / NSEC_PER_USEC);
+			regaddr, bit_mask, div64_u64(p_delay->ns, NSEC_PER_USEC));
 		err = -EAGAIN;
 	}
 
@@ -396,7 +396,7 @@ static int adrv906x_tod_hw_op_poll(struct adrv906x_tod_counter *counter, u8 op_f
 /**
  * @brief Compensate tstamps to write to HW register before a set operation
  * @param counter Context struct
- * @param tstamp Tstamp to compensate
+ * @param tstamp Timestamp to compensate
  * @param trig_delay Timespan to compensate
  */
 static void adrv906x_tod_compensate_tstamp(struct adrv906x_tod_counter *counter,
@@ -444,7 +444,7 @@ static void adrv906x_tod_compensate_tstamp(struct adrv906x_tod_counter *counter,
 /**
  * @brief Write tstamp to HW
  * @param counter Context struct
- * @param tstamp Tstamp to write
+ * @param tstamp Timestamp to write to register
  */
 static void adrv906x_tod_hw_settstamp_to_reg(struct adrv906x_tod_counter *counter,
 					     const struct adrv906x_tod_tstamp *tstamp)
@@ -675,7 +675,7 @@ static int adrv906x_tod_hw_adjust_time(struct adrv906x_tod_counter *counter, s64
 /**
  * @brief Enable the ToD output in the CDC domain
  * @param counter Context struct
- * @param enable Enable flag, non-zero to enable
+ * @param enable flag, non-zero to enable
  * @return 0 Success
  * @return -ENODEV Requesting to enable output for a disabled counter
  */
@@ -703,7 +703,7 @@ static int adrv906x_tod_hw_cdc_output_enable(struct adrv906x_tod_counter *counte
 /**
  * @brief Instruct HW to enable the ToD output
  * @param counter Context struct
- * @param enable Enable flag, non-zero to enable
+ * @param enable flag, non-zero to enable
  * @return See adrv906x_tod_hw_op_poll_reg()
  */
 static int adrv906x_tod_hw_extts_enable(struct adrv906x_tod_counter *counter, u8 enable)
@@ -742,7 +742,7 @@ static int adrv906x_tod_hw_extts_enable(struct adrv906x_tod_counter *counter, u8
 /**
  * @brief Enable the interrupt lines for the referenced counter
  * @param counter Context struct
- * @param enable Enable flag, non-zero to enable
+ * @param enable flag, non-zero to enable
  * @return 0 Success
  * @return -ENODEV Referred counter not active
  */
@@ -798,7 +798,7 @@ static void adrv906x_tod_hw_pps_irq_disable_all(struct adrv906x_tod *tod)
  * @brief Select the referenced counter as the PPS source and en-/disable the PPS output
  * @note This function doesn't change the output if the external PPS is enabled
  * @param counter Context struct
- * @param enable Enable flag, non-zero to enable
+ * @param enable flag, non-zero to enable
  * @return See adrv906x_tod_hw_op_poll_reg()
  */
 static int adrv906x_tod_hw_pps_enable(struct adrv906x_tod_counter *counter, u8 enable)
@@ -910,7 +910,7 @@ static void adrv906x_tod_hw_cfg_ppsx(struct adrv906x_tod_counter *counter,
 
 /**
  * @brief Configure the periodic output for the referenced counter
- * @param counter Counter struct
+ * @param counter Context struct
  * @param rq Request struct
  */
 static void adrv906x_tod_perout_enable(struct adrv906x_tod_counter *counter,
@@ -1007,7 +1007,7 @@ static void adrv906x_tod_dt_parse(struct adrv906x_tod_counter *counter, struct d
 /**
  * @brief Configure CDC and enable tstamp output for the referenced counter
  * @param counter Context struct
- * @param enable Enable flag, non-zero to enable
+ * @param enable flag, non-zero to enable
  * @return See adrv906x_tod_hw_extts_enable() or adrv906x_tod_hw_cdc_output_enable()
  */
 static int adrv906x_tod_extts_enable(struct adrv906x_tod_counter *counter, u8 enable)
@@ -1038,7 +1038,7 @@ exit:
  * @brief Configure the tstamp output
  * @param counter Context struct
  * @param rq Request struct
- * @param enable Enable flag, non-zero to enable
+ * @param enable flag, non-zero to enable
  * @return 0 Success
  * @return -EOPNOTSUPP Unsupported request
  * @return -EINVAL Only aligned PPS pulses are supported
@@ -1085,6 +1085,7 @@ static int adrv906x_tod_enable(struct adrv906x_tod_counter *counter,
 
 		/* Enable ppsx for periodic output for given tod counter */
 		adrv906x_tod_perout_enable(counter, &rq->perout);
+		ret = 0;
 		break;
 	case PTP_CLK_REQ_PPS:
 		/* Enable internal pps output for given tod counter */
@@ -1154,8 +1155,10 @@ static int adrv906x_tod_gettimex(struct adrv906x_tod_counter *counter,
 	ptp_read_system_prets(sts);
 	err = adrv906x_tod_hw_get_tstamp(counter, &tstamp);
 	ptp_read_system_postts(sts);
-	tstamp_to_timespec(ts, &tstamp);
 	mutex_unlock(&tod->reg_lock);
+
+	if (!err)
+		tstamp_to_timespec(ts, &tstamp);
 
 	return err;
 }
@@ -1459,7 +1462,6 @@ int adrv906x_tod_probe(struct platform_device *pdev)
 
 	adrv906x_tod->irq = platform_get_irq_byname(pdev, "pps");
 	if (adrv906x_tod->irq < 0) {
-		dev_err(dev, "dt: irq node missing");
 		ret = -ENOENT;
 		goto err_out;
 	}
@@ -1474,8 +1476,10 @@ int adrv906x_tod_probe(struct platform_device *pdev)
 	}
 
 	tod_np = of_get_child_by_name(np, "adrv906x-tod");
-	if (!tod_np)
+	if (!tod_np) {
+		ret = -ENOENT;
 		goto err_out;
+	}
 
 	mutex_init(&adrv906x_tod->reg_lock);
 
@@ -1515,6 +1519,7 @@ int adrv906x_tod_probe(struct platform_device *pdev)
 		adrv906x_tod->tod_counter_src = val;
 	} else {
 		dev_err(dev, "selected default tod not enabled - exiting");
+		ret = -EINVAL;
 		goto err_out_unreg;
 	}
 

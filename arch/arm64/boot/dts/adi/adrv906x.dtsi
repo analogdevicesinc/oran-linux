@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2023, Analog Devices Incorporated, All Rights Reserved
+ * Copyright (c) 2026, Analog Devices Incorporated, All Rights Reserved
  */
 
 /dts-v1/;
@@ -159,7 +159,7 @@
 	};
 
 	/* Definition of primary and secondary regions
-	 * Secondary regions are only intended for a special use-case (dual-tile 
+	 * Secondary regions are only intended for a special use-case (dual-tile
 	 * with no Linux on secondary, but DDR installed in secondary)
 	 */
 
@@ -182,9 +182,9 @@
 	/* Reserved memory regions
 	 * 1) U-boot will enable secondary regions only for the special use-case.
 	 *    They are intentionally left disabled by default.
-	 * 2) DDR base address (primary and secondary) is computed and 
+	 * 2) DDR base address (primary and secondary) is computed and
 	 *    populated by U-boot. This value is intentionally left blank
-	 * 3) The size of each region is explicitly defined, except for the 
+	 * 3) The size of each region is explicitly defined, except for the
 	 *    secondary DDR region. U-boot will populate the whole secondary DDR
 	 *    region
 	 */
@@ -565,7 +565,7 @@
 		pinctrl-0 = <&pinctrl_emac0_rgmii>;
 		status = "disabled";
 		#address-cells = <1>;
-	        #size-cells = <1>;
+		#size-cells = <1>;
 		emac0_clk_div: clock_divider {
 			reg = <EMAC_1G_DIV_CTRL 0x04>;
 			ctrl_reg = <EMAC_1G_CLK_CTRL 0x08>;
@@ -773,7 +773,7 @@
 		reg = <NDMA_1_INTR_CTRL 0x20>;
 	};
 
-	ndma0: ndma0@NDMA_0_TX_BASE_UADDR {
+	ndma0: ndma@NDMA_0_TX_BASE_UADDR {
 		id = <0>;
 		reg = <NDMA_0_TX_BASE 0x100>,
 			  <NDMA_0_TX_DMA 0x80>,
@@ -793,8 +793,7 @@
 		interrupt-ctrl = <&ndma0_interrupt_ctrl>;
 	};
 
-
-	ndma1: ndma1@NDMA_1_TX_BASE_UADDR {
+	ndma1: ndma@NDMA_1_TX_BASE_UADDR {
 		id = <1>;
 		reg = <NDMA_1_TX_BASE 0x100>,
 			  <NDMA_1_TX_DMA 0x80>,
@@ -830,7 +829,7 @@
 		status = "disabled";
 	};
 
-	ptpclk: ptpclk {
+	ptpclk: ptpclk@EMAC_TOD_BASE_UADDR {
 		compatible = "adi,adrv906x-tod";
 		#address-cells = <1>;
 		#size-cells = <1>;

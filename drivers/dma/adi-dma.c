@@ -522,7 +522,7 @@ static void __adi_dma_process_descriptor(struct adi_dma_descriptor *desc)
 	channel->current_desc = desc;
 	desc->src = dde_desc->start;
 
-	dev_dbg(dma->dev, "dma config: src = 0x%llx, dst = 0x%llx\n", desc->src, desc->dest);
+	dev_dbg(dma->dev, "dma config: src = %pad, dst = %pad\n", &desc->src, &desc->dest);
 	dev_dbg(dma->dev, "  xcount = %d, xmod = %d, cfg = 0x%x\n", dde_desc->xcnt, dde_desc->xmod, dde_desc->cfg);
 
 	if (dde_desc->cfg & DMA2D) {
@@ -1185,7 +1185,7 @@ static void __adi_dma_prep_slave_sg_desc_list(struct adi_dma_descriptor *desc, s
 
 	INIT_LIST_HEAD(&desc->dde_desc_list);
 
-	dde_desc = adi_dma_alloc_dde_descriptor(dma);
+	dde_desc = dde_desc_next = adi_dma_alloc_dde_descriptor(dma);
 
 	sync = adi_chan->ch_sync_disable ? 0 : DMASYNC;
 
@@ -1413,7 +1413,7 @@ static int adi_dma_probe(struct platform_device *pdev)
 
 	child = NULL;
 	while ((child = of_get_next_child(np, child))) {
-		ret = adi_dma_init_channel(dma, child, res->start, res->end - res->start + 1);
+		ret = adi_dma_init_channel(dma, child, res->start, resource_size(res));
 		if (ret) {
 			of_node_put(child);
 			return ret;

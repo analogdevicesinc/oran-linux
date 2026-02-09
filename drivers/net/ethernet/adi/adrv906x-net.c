@@ -40,7 +40,7 @@
 #define DEFAULT_RECOVERED_CLK_DIV_25G       55
 
 static char *macaddr[MAX_NETDEV_NUM];
-module_param_array(macaddr, charp, 0, 0644);
+module_param_array(macaddr, charp, NULL, 0644);
 MODULE_PARM_DESC(macaddr, "set dev0 and dev1 mac addresses via kernel module parameter");
 static u64 default_multicast_list[MAX_MULTICAST_FILTERS] = {
 	0x0000011B19000000, 0x00000180C200000E, 0x00000180C2000003
@@ -1156,9 +1156,11 @@ static void adrv906x_eth_remove(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < MAX_NETDEV_NUM; i++) {
-		adrv906x_ndma_remove(eth_if->adrv906x_dev[i]->ndma_dev);
-		if (es->enabled)
-			break;
+		if (eth_if->adrv906x_dev[i]->ndma_dev) {
+			adrv906x_ndma_remove(eth_if->adrv906x_dev[i]->ndma_dev);
+			if (es->enabled)
+				break;
+		}
 	}
 
 	adrv906x_mdio_unregister(eth_if);
@@ -1174,7 +1176,6 @@ static struct platform_driver adrv906x_eth_drv = {
 	.driver			= {
 		.name		= "adrv906x-net",
 		.of_match_table = of_match_ptr(adrv906x_eth_dt_ids),
-		.owner		= THIS_MODULE,
 	},
 };
 
