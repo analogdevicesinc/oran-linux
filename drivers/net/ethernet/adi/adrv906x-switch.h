@@ -108,6 +108,7 @@
 struct switch_port {
 	unsigned int config_mask;
 	void __iomem *reg;
+	u16 pvid;
 };
 
 struct switch_pcp {
@@ -171,7 +172,6 @@ struct adrv906x_eth_switch {
 	void __iomem *reg_match_action;
 	void __iomem *reg_switch;
 	u16 default_vids[NUM_DEFAULT_VIDS];
-	u16 pvid;
 	int err_irqs[SWITCH_MAX_PORT_NUM - 1];
 	atomic64_t err_irq_count[SWITCH_MAX_PORT_NUM - 1];
 	atomic64_t port_reset_count;

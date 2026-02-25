@@ -241,11 +241,6 @@ patternProperties:
         items:
           - const: switch_error_0
           - const: switch_error_1
-      pvid:
-        $ref: /schemas/types.yaml#/definitions/uint32
-        minimum: 1
-        maximum: 4094
-        description: Primary VLAN ID (1–4094).
       vids:
         $ref: /schemas/types.yaml#/definitions/uint32-array
         minItems: 1
@@ -273,6 +268,9 @@ patternProperties:
           reg:
             maxItems: 1
             description: Physical base address for the specific switch port.
+          pvid:
+            $ref: /schemas/types.yaml#/definitions/uint16
+            description: Default primary VLAN IDs (1–4094) for the specific switch port.
         additionalProperties: false
     additionalProperties: false
 
@@ -409,20 +407,22 @@ examples:
         interrupt-names = "switch_error_0", "switch_error_1";
         interrupts = <GIC_SPI ETH_IRQ_PCS_RX_ERROR_0 IRQ_TYPE_LEVEL_HIGH>,
                      <GIC_SPI ETH_IRQ_PCS_RX_ERROR_1 IRQ_TYPE_LEVEL_HIGH>;
-        pvid = <1>;
         vids = <2 3 4 5>;
         vlan_enabled;
         switch_port0:switch-port@0 {
           id = <0>;
           reg = <EMAC_SW_PORT_0_BASE 0x400>;
+          pvid = /bits/ 16 <1>;
         };
         switch_port1:switch-port@1 {
           id = <1>;
           reg = <EMAC_SW_PORT_1_BASE 0x400>;
+          pvid = /bits/ 16 <1>;
         };
         switch_port2:switch-port@2 {
           id = <2>;
           reg = <EMAC_SW_PORT_2_BASE 0x400>;
+          pvid = /bits/ 16 <1>;
         };
       };
     };

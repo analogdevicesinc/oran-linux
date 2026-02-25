@@ -298,6 +298,7 @@ static void __skb_pvid_pop(struct net_device *ndev, struct sk_buff *skb)
 	unsigned short ether_type = ntohs(hdr->h_proto);
 	struct vlan_hdr *vhdr;
 	unsigned short vlan_tag;
+	int switch_port;
 
 	if (!es->enabled || ether_type != ETH_P_8021Q)
 		return;
@@ -305,9 +306,12 @@ static void __skb_pvid_pop(struct net_device *ndev, struct sk_buff *skb)
 	vhdr = (struct vlan_hdr *)(skb->data + ETH_HLEN);
 	vlan_tag = ntohs(vhdr->h_vlan_TCI);
 
-	if ((vlan_tag & VLAN_VID_MASK) == es->pvid) {
-		memmove(skb->data + VLAN_HLEN, skb->data, 2 * ETH_ALEN);
-		skb_pull(skb, VLAN_HLEN);
+	for (switch_port = 0; switch_port < SWITCH_MAX_PORT_NUM; switch_port++) {
+		if ((vlan_tag & VLAN_VID_MASK) == es->switch_port[switch_port].pvid) {
+			memmove(skb->data + VLAN_HLEN, skb->data, 2 * ETH_ALEN);
+			skb_pull(skb, VLAN_HLEN);
+			return;
+		}
 	}
 }
 
