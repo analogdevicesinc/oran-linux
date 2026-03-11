@@ -34,7 +34,6 @@
 		switch_port2:switch-port@2 {
 			id = <2>;
 			reg = <EMAC_SW_PORT_2_BASE 0x400>;
-			pvid = /bits/ 16 <1>;
 		};
 	};
 };

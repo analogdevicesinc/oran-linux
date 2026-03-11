@@ -110,8 +110,8 @@ static void adrv906x_switch_dsa_rx_enable(struct adrv906x_eth_switch *es, bool e
 
 int adrv906x_switch_vlan_add(struct adrv906x_eth_switch *es, u16 port, u16 vid)
 {
-	int i, ret;
 	u32 mask;
+	int ret;
 
 	if (port >= SWITCH_MAX_PORT_NUM)
 		return -EINVAL;
@@ -120,12 +120,10 @@ int adrv906x_switch_vlan_add(struct adrv906x_eth_switch *es, u16 port, u16 vid)
 		return -EINVAL;
 
 	mutex_lock(&es->lock);
-	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
-		if (es->switch_port[i].pvid == vid) {
-			dev_info(&es->pdev->dev, "cannot add pvid %u to port %u", vid, port);
-			mutex_unlock(&es->lock);
-			return -EINVAL;
-		}
+	if (es->switch_port[port].pvid == vid) {
+		dev_info(&es->pdev->dev, "cannot add pvid %u to port %u", vid, port);
+		mutex_unlock(&es->lock);
+		return -EINVAL;
 	}
 
 	mask = BIT(port);
@@ -145,8 +143,8 @@ int adrv906x_switch_vlan_add(struct adrv906x_eth_switch *es, u16 port, u16 vid)
 
 int adrv906x_switch_vlan_del(struct adrv906x_eth_switch *es, u16 port, u16 vid)
 {
-	int ret, i;
 	u32 mask;
+	int ret;
 
 	if (port + 1 > SWITCH_MAX_PORT_NUM)
 		return -EINVAL;
@@ -155,12 +153,10 @@ int adrv906x_switch_vlan_del(struct adrv906x_eth_switch *es, u16 port, u16 vid)
 		return -EINVAL;
 
 	mutex_lock(&es->lock);
-	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
-		if (es->switch_port[i].pvid == vid) {
-			dev_info(&es->pdev->dev, "cannot del pvid %u to port %u", vid, port);
-			mutex_unlock(&es->lock);
-			return -EINVAL;
-		}
+	if (es->switch_port[port].pvid == vid) {
+		dev_info(&es->pdev->dev, "cannot del pvid %u to port %u", vid, port);
+		mutex_unlock(&es->lock);
+		return -EINVAL;
 	}
 
 	mask = BIT(port);
@@ -203,44 +199,48 @@ int adrv906x_switch_vlan_del_cpuport(struct adrv906x_eth_switch *es, u16 vid)
 
 static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u16 pvid)
 {
-	bool pvid_used_by_other_port = false;
-	int ret, i;
+	bool pvid_used_by_another_front_port = false;
+	u32 port_mask;
 	u16 old_pvid;
+	int ret, i;
 	u32 val;
 
-	if (port >= SWITCH_MAX_PORT_NUM)
+	if (port >= SWITCH_MAX_PORT_NUM - 1)
 		return -EINVAL;
 	if (pvid == 0 || pvid >= VLAN_N_VID - 1)
 		return -EINVAL;
 
 	mutex_lock(&es->lock);
-	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
-		if (es->switch_port[i].pvid == pvid)
-			pvid_used_by_other_port = true;
+	if (pvid == es->switch_port[port].pvid) {
+		mutex_unlock(&es->lock);
+		return 0;
 	}
 
-	if (es->vlan_port_mask[pvid] && !pvid_used_by_other_port) {
+	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
+		if (es->switch_port[i].pvid == pvid)
+			pvid_used_by_another_front_port = true;
+	}
+
+	if (es->vlan_port_mask[pvid] && !pvid_used_by_another_front_port) {
 		dev_err(&es->pdev->dev, "cannot set pvid %u for port %u, vlan already in use",
 			pvid, port);
 		mutex_unlock(&es->lock);
 		return -EINVAL;
 	}
 
-	ret = adrv906x_switch_vlan_match_action_sync(es, SWITCH_PVID_PORT_MASK, pvid);
+	port_mask = es->vlan_port_mask[pvid] | BIT(port) | BIT(SWITCH_CPU_PORT);
+	ret = adrv906x_switch_vlan_match_action_sync(es, port_mask, pvid);
 	if (ret) {
 		dev_err(&es->pdev->dev, "pvid set timed out");
 		mutex_unlock(&es->lock);
 		return ret;
 	}
 
-	es->vlan_port_mask[pvid] = SWITCH_PVID_PORT_MASK;
+	es->vlan_port_mask[pvid] = port_mask;
 
 	val = ioread32(es->switch_port[port].reg + SWITCH_PORT_CFG_VLAN);
 	val &= ~SWITCH_PORT_PVID_MASK;
 	val |= pvid;
-	/* Disable VLAN on CPU port so different port PVIDs can work */
-	if (port == SWITCH_CPU_PORT)
-		val &= ~SWITCH_PORT_VLAN_EN_MASK;
 	iowrite32(val, es->switch_port[port].reg + SWITCH_PORT_CFG_VLAN);
 
 	old_pvid = es->switch_port[port].pvid;
@@ -250,18 +250,24 @@ static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u1
 	 * At this point the new PVID is already programmed in hardware, so we must
 	 * update software state regardless of whether old PVID cleanup succeeds.
 	 */
-	pvid_used_by_other_port = false;
-	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
-		if (es->switch_port[i].pvid == old_pvid)
-			pvid_used_by_other_port = true;
+	pvid_used_by_another_front_port = false;
+	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
+		if (i != port && es->switch_port[i].pvid == old_pvid)
+			pvid_used_by_another_front_port = true;
 	}
-
-	if (!pvid_used_by_other_port) {
+	if (!pvid_used_by_another_front_port) {
 		ret = adrv906x_switch_vlan_match_action_sync(es, 0, old_pvid);
 		if (ret)
 			dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
 				 old_pvid);
 		es->vlan_port_mask[old_pvid] = 0;
+	} else {
+		port_mask = es->vlan_port_mask[old_pvid] & ~BIT(port);
+		ret = adrv906x_switch_vlan_match_action_sync(es, port_mask, old_pvid);
+		if (ret)
+			dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
+				 old_pvid);
+		es->vlan_port_mask[old_pvid] = port_mask;
 	}
 	mutex_unlock(&es->lock);
 
@@ -514,7 +520,7 @@ static ssize_t port_vlan_ctrl_show(struct device *dev,
 	u32 reg;
 
 	char_cnt = sprintf(buf + char_cnt, "%-8s%-4s\n", "port", "pvid");
-	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
+	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
 		io = es->switch_port[i].reg;
 		reg = ioread32(io + SWITCH_PORT_CFG_VLAN);
 		reg &= SWITCH_PORT_PVID_MASK;
@@ -832,17 +838,22 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 
 		/* Initialize to hardware default PVID after reset */
 		es->switch_port[i].pvid = SWITCH_PVID;
-		ret = of_property_read_u16(switch_port_np, "pvid", &pvid);
-		if (ret < 0)
-			pvid = SWITCH_PVID;
-		if (pvid == 0 || pvid >= VLAN_N_VID - 1) {
-			dev_warn(dev, "invalid pvid %u from DT, using default %u",
-				 pvid, SWITCH_PVID);
-			pvid = SWITCH_PVID;
+		/* no vlan tag processing on CPU port */
+		if (i != SWITCH_CPU_PORT) {
+			ret = of_property_read_u16(switch_port_np, "pvid", &pvid);
+			if (ret < 0) {
+				pvid = SWITCH_PVID;
+				of_node_put(switch_port_np);
+			}
+			if (pvid == 0 || pvid >= VLAN_N_VID - 1) {
+				dev_warn(dev, "invalid pvid %u from DT, using default %u",
+					 pvid, SWITCH_PVID);
+				pvid = SWITCH_PVID;
+			}
+			ret = adrv906x_switch_pvid_set(es, i, pvid);
+			if (ret)
+				return ret;
 		}
-		ret = adrv906x_switch_pvid_set(es, i, pvid);
-		if (ret)
-			return ret;
 		i++;
 	}
 

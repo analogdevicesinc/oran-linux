@@ -270,7 +270,7 @@ patternProperties:
             description: Physical base address for the specific switch port.
           pvid:
             $ref: /schemas/types.yaml#/definitions/uint16
-            description: Default primary VLAN IDs (1–4094) for the specific switch port.
+            description: (optional) Default primary VLAN IDs (1–4094) for the fronthaul switch port.
         additionalProperties: false
     additionalProperties: false
 
@@ -422,7 +422,6 @@ examples:
         switch_port2:switch-port@2 {
           id = <2>;
           reg = <EMAC_SW_PORT_2_BASE 0x400>;
-          pvid = /bits/ 16 <1>;
         };
       };
     };
