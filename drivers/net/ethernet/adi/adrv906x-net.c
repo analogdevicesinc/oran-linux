@@ -615,10 +615,11 @@ static int adrv906x_eth_open(struct net_device *ndev)
 
 	adrv906x_eth_oran_if_en(&adrv906x_dev->oif);
 
-	phy_start(ndev->phydev);
+	if (ndev->phydev)
+		phy_start(ndev->phydev);
 
-	adrv906x_ndma_open(ndma_dev, adrv906x_eth_tx_callback, adrv906x_eth_rx_callback, ndev,
-			   adrv906x_eth_flood_callback, false);
+	adrv906x_ndma_open(ndma_dev, adrv906x_eth_tx_callback, adrv906x_eth_rx_callback,
+			   ndev, adrv906x_eth_flood_callback);
 
 #if IS_ENABLED(CONFIG_MACSEC)
 	if (adrv906x_dev->macsec)

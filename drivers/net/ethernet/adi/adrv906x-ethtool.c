@@ -27,12 +27,9 @@
 #include "adrv906x-ndma.h"
 #include "adrv906x-ethtool.h"
 
-#define NDMA_LOOPBACK_TEST_PATTERN              0x12
-#define NDMA_LOOPBACK_TEST_SIZE                 1024
-
-/* TODO: Ugly global variable, need to be changed */
+/* TODO: Replace global variable with proper module communication */
 #if IS_BUILTIN(CONFIG_PTP_1588_CLOCK_ADRV906X)
-/* The adi ptp module will set this variable */
+/* PTP module sets this variable */
 extern int adrv906x_phc_index;
 #endif
 extern const struct ethtool_ops adrv906x_ethtool_ops;
@@ -203,8 +200,8 @@ static const char adrv906x_gstrings_stats_names[][ETH_GSTRING_LEN] = {
 };
 
 static const char adrv906x_gstrings_selftest_names[][ETH_GSTRING_LEN] = {
-	"Near-end loopback:       ",
-	"NDMA loopback:           ",
+	"NDMA loopback:    ",
+	"Near-end loopback:",
 };
 
 #define ADRV906X_NUM_STATS ARRAY_SIZE(adrv906x_gstrings_stats_names)
@@ -222,35 +219,26 @@ struct payload_hdr {
 	u8 id;
 } __packed;
 
-struct adrv906x_packet_attrs {
+struct adrv906x_loopback_test_attrs {
 	const unsigned char *src;
 	const unsigned char *dst;
 	u32 ip_src;
 	u32 ip_dst;
-	int sport;
-	int dport;
 	u32 exp_hash;
-	int dont_wait;
 	int timeout;
-	int size;
-	int max_size;
 	u8 id;
-	u16 queue_mapping;
-	u64 timestamp;
 };
 
 struct adrv906x_test_priv {
-	union {
-		struct adrv906x_packet_attrs *packet;
-		struct net_device *ndev;
-	};
+	struct adrv906x_loopback_test_attrs *attrs;
 	struct packet_type pt;
 	struct completion completion;
-	int ok;
+	bool ok;
 };
 
 #define ADRV906X_TEST_PKT_SIZE (sizeof(struct ethhdr) + sizeof(struct iphdr) + \
 				sizeof(struct udphdr) + sizeof(struct payload_hdr))
+#define ADRV906X_TEST_PKT_TOTAL_SIZE 1024
 #define ADRV906X_TEST_PKT_MAGIC 0xdeadcafecafedeadULL
 #define ADRV906X_LB_TIMEOUT       msecs_to_jiffies(200)
 
@@ -273,10 +261,10 @@ static int adrv906x_ethtool_set_link_ksettings(struct net_device *ndev,
 
 	linkmode_copy(advertising, cmd->link_modes.advertising);
 
-	/* We make sure that we don't pass unsupported values in to the PHY */
+	/* Filter out unsupported link modes */
 	linkmode_and(advertising, advertising, phydev->supported);
 
-	/* Verify the settings we care about. */
+	/* Reject autonegotiation */
 	if (autoneg == AUTONEG_ENABLE)
 		return -EINVAL;
 
@@ -566,16 +554,20 @@ static int adrv906x_ethtool_set_fecparam(struct net_device *ndev,
 }
 
 static struct sk_buff *adrv906x_test_get_udp_skb(struct net_device *ndev,
-						 struct adrv906x_packet_attrs *attr)
+						 struct adrv906x_loopback_test_attrs *attr)
 {
 	struct sk_buff *skb = NULL;
 	struct udphdr *uhdr = NULL;
 	struct payload_hdr *phdr;
 	struct ethhdr *ehdr;
 	struct iphdr *ihdr;
-	int iplen, size;
+	int iplen, size, payload_size;
+	u8 *payload_data;
+	int i;
 
-	size = ADRV906X_TEST_PKT_SIZE;
+	/* Calculate payload to pad packet to 1024 bytes */
+	payload_size = ADRV906X_TEST_PKT_TOTAL_SIZE - ADRV906X_TEST_PKT_SIZE;
+	size = ADRV906X_TEST_PKT_TOTAL_SIZE + NDMA_TX_HDR_SOF_SIZE;
 
 	skb = netdev_alloc_skb(ndev, size);
 	if (!skb)
@@ -583,9 +575,9 @@ static struct sk_buff *adrv906x_test_get_udp_skb(struct net_device *ndev,
 
 	prefetchw(skb->data);
 
-	ehdr = skb_push(skb, ETH_HLEN);
-
+	skb_reserve(skb, NDMA_TX_HDR_SOF_SIZE);
 	skb_reset_mac_header(skb);
+	ehdr = (struct ethhdr *)skb_put(skb, ETH_HLEN);
 
 	skb_set_network_header(skb, skb->len);
 	ihdr = skb_put(skb, sizeof(*ihdr));
@@ -601,14 +593,14 @@ static struct sk_buff *adrv906x_test_get_udp_skb(struct net_device *ndev,
 
 	ehdr->h_proto = htons(ETH_P_IP);
 
-	uhdr->len = htons(sizeof(*phdr) + sizeof(*uhdr) + attr->size);
+	uhdr->len = htons(sizeof(*phdr) + sizeof(*uhdr) + payload_size);
 	uhdr->check = 0;
 
 	ihdr->ihl = 5;
 	ihdr->ttl = 32;
 	ihdr->version = 4;
 	ihdr->protocol = IPPROTO_UDP;
-	iplen = sizeof(*ihdr) + sizeof(*phdr) + attr->size;
+	iplen = sizeof(*ihdr) + sizeof(*phdr) + payload_size;
 	iplen += sizeof(*uhdr);
 
 	ihdr->tot_len = htons(iplen);
@@ -625,6 +617,11 @@ static struct sk_buff *adrv906x_test_get_udp_skb(struct net_device *ndev,
 	attr->id = adrv906x_packet_next_id;
 	phdr->id = adrv906x_packet_next_id++;
 
+	/* Add padding data */
+	payload_data = skb_put(skb, payload_size);
+	for (i = 0; i < payload_size; i++)
+		payload_data[i] = i & 0xff;
+
 	skb->csum = 0;
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	udp4_hwcsum(skb, ihdr->saddr, ihdr->daddr);
@@ -640,8 +637,8 @@ static int adrv906x_test_loopback_validate(struct sk_buff *skb, struct net_devic
 					   struct packet_type *pt, struct net_device *orig_ndev)
 {
 	struct adrv906x_test_priv *tpriv = pt->af_packet_priv;
-	const unsigned char *src = tpriv->packet->src;
-	const unsigned char *dst = tpriv->packet->dst;
+	const unsigned char *src = tpriv->attrs->src;
+	const unsigned char *dst = tpriv->attrs->dst;
 
 	struct payload_hdr *phdr;
 	struct ethhdr *ehdr;
@@ -678,9 +675,9 @@ static int adrv906x_test_loopback_validate(struct sk_buff *skb, struct net_devic
 
 	if (phdr->magic != cpu_to_be64(ADRV906X_TEST_PKT_MAGIC))
 		goto out;
-	if (tpriv->packet->exp_hash && !skb->hash)
+	if (tpriv->attrs->exp_hash && !skb->hash)
 		goto out;
-	if (tpriv->packet->id != phdr->id)
+	if (tpriv->attrs->id != phdr->id)
 		goto out;
 
 	tpriv->ok = true;
@@ -691,7 +688,7 @@ out:
 }
 
 static int adrv906x_test_near_end_loopback_run(struct net_device *ndev,
-					       struct adrv906x_packet_attrs *attr)
+					       struct adrv906x_loopback_test_attrs *attr)
 {
 	struct adrv906x_test_priv *tpriv;
 	struct sk_buff *skb = NULL;
@@ -709,7 +706,7 @@ static int adrv906x_test_near_end_loopback_run(struct net_device *ndev,
 	tpriv->pt.func = adrv906x_test_loopback_validate;
 	tpriv->pt.dev = ndev;
 	tpriv->pt.af_packet_priv = tpriv;
-	tpriv->packet = attr;
+	tpriv->attrs = attr;
 
 	dev_add_pack(&tpriv->pt);
 	skb = adrv906x_test_get_udp_skb(ndev, attr);
@@ -722,9 +719,6 @@ static int adrv906x_test_near_end_loopback_run(struct net_device *ndev,
 	if (ret)
 		goto cleanup;
 
-	if (unlikely(!attr->timeout))
-		attr->timeout = ADRV906X_LB_TIMEOUT;
-
 	wait_for_completion_timeout(&tpriv->completion, attr->timeout);
 
 	ret = tpriv->ok ? 0 : -ETIMEDOUT;
@@ -736,196 +730,114 @@ cleanup:
 	return ret;
 }
 
-static int adrv906x_test_set_phy_loopback(struct net_device *ndev, bool enable)
-{
-	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
-	struct phy_device *phydev = ndev->phydev;
-
-	/* Start/stop update of PHY status in PAL */
-	phy_loopback(phydev, enable);
-
-	if (enable) {
-		mutex_lock(&phydev->lock);
-		phydev->dev_flags |= ADRV906X_PHY_FLAGS_LOOPBACK_TEST;
-		mutex_unlock(&phydev->lock);
-	} else {
-		mutex_lock(&phydev->lock);
-		phydev->dev_flags &= ~ADRV906X_PHY_FLAGS_LOOPBACK_TEST;
-		mutex_unlock(&phydev->lock);
-	}
-
-	adrv906x_cmn_set_phy_loopback(adrv906x_dev, enable);
-
-	/* Give PHY time to establish link */
-	msleep(2000);
-
-	return 0;
-}
-
-static int adrv906x_test_near_end_loopback_test(struct net_device *ndev)
+static int adrv906x_phy_loopback_config(struct net_device *ndev, bool enable)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
 	struct adrv906x_mac *mac = &adrv906x_dev->mac;
 	struct phy_device *phydev = ndev->phydev;
-	struct adrv906x_packet_attrs attr = { };
-	int dev_state = netif_running(ndev);
-	int ret;
+	int other_port = 1 - adrv906x_dev->port;
 
-	if (es->enabled)
-		adrv906x_cmn_switch_ports_reset(es);
-	adrv906x_mac_set_path(mac, true);
-
-	if (dev_state) {
-		netdev_printk(KERN_DEBUG, ndev, "stopping device in network stack");
-		netif_tx_stop_all_queues(ndev);
-		netif_carrier_off(ndev);
-	}
-	adrv906x_test_set_phy_loopback(ndev, true);
-
-	phy_resume(phydev);
-	if (es->enabled)
-		adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
-
-	attr.dst = ndev->dev_addr;
-	ret = adrv906x_test_near_end_loopback_run(ndev, &attr);
-	netdev_printk(KERN_DEBUG, ndev, "test result: %d", ret);
-	if (ret)
-		goto out;
-
-out:
-	adrv906x_test_set_phy_loopback(ndev, false);
-	if (dev_state) {
-		netdev_printk(KERN_DEBUG, ndev, "restarting device in network stack");
-		netif_tx_start_all_queues(ndev);
-		netif_carrier_on(ndev);
-	}
-
-	msleep(2000);
-	adrv906x_mac_set_path(mac, false);
-
-	phy_suspend(phydev);
-	if (es->enabled) {
-		adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
-		adrv906x_switch_port_reset(es);
-	}
-
-	return ret;
-}
-
-static void adrv906x_ndma_loopback_tx_callback(struct sk_buff *skb, unsigned int port_id,
-					       struct timespec64 *ts, void *cb_param)
-{
-	dev_kfree_skb(skb);
-}
-
-static void adrv906x_ndma_loopback_rx_callback(struct sk_buff *skb, unsigned int port_id,
-					       struct timespec64 *ts, void *cb_param)
-{
-	struct adrv906x_test_priv *tpriv = (struct adrv906x_test_priv *)cb_param;
-	struct net_device *ndev = tpriv->ndev;
-	unsigned char *p;
-	int i;
-
-	p = skb->data;
-	for (i = 0; i < NDMA_LOOPBACK_TEST_SIZE; i++) {
-		if (*p != NDMA_LOOPBACK_TEST_PATTERN) {
-			netdev_printk(KERN_DEBUG, ndev, "rx:0x%x tx:0x%x", *p, i);
-			tpriv->ok = false;
-			break;
+	if (enable) {
+		phy_loopback(phydev, true);
+		msleep(100);
+		adrv906x_mac_set_path(mac, true);
+		if (es->enabled) {
+			/* Disable the other port to isolate loopback traffic */
+			adrv906x_switch_port_enable(es, other_port, false);
+			adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
 		}
-		p++;
+	} else {
+		if (es->enabled) {
+			adrv906x_switch_port_enable(es, other_port, false);
+			adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
+		}
+		adrv906x_mac_set_path(mac, false);
+		phy_loopback(phydev, false);
 	}
-	dev_kfree_skb(skb);
-	complete(&tpriv->completion);
+
+	return 0;
 }
 
-static int adrv906x_ndma_loopback_test(struct net_device *ndev)
+static int adrv906x_ndma_loopback_config(struct net_device *ndev, bool enable)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_ndma_dev *ndma_dev = adrv906x_dev->ndma_dev;
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
-	struct adrv906x_eth_dev *temp_eth_dev;
-	struct adrv906x_test_priv *tpriv;
-	int port = adrv906x_dev->port;
-	struct net_device *temp_ndev;
-	struct sk_buff *tx_data1;
-	bool all_down = false;
-	int i, ret = 0, tmo;
-	unsigned char *p;
+	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
+	struct phy_device *phydev = ndev->phydev;
 
-	tpriv = kzalloc(sizeof(*tpriv), GFP_KERNEL);
-	if (!tpriv)
-		return -ENOMEM;
-	tpriv->ok = true;
-	init_completion(&tpriv->completion);
-	tpriv->ndev = ndev;
+	adrv906x_switch_port_enable(es, SWITCH_CPU_PORT, !enable);
+	adrv906x_ndma_config_loopback(ndma_dev, enable);
+	/* Set PHY loopback to disable communication with the seres app */
+	phy_loopback(phydev, enable);
 
-	if (eth_if->ethswitch.enabled) {
-		if (kref_read(&ndma_dev->refcount) > 1) {
-			netdev_printk(KERN_DEBUG, ndev, "switch enabled, shut down both interfaces");
-			all_down = true;
-			for (i = 0; i < MAX_NETDEV_NUM; i++) {
-				temp_eth_dev = eth_if->adrv906x_dev[i];
-				temp_ndev = temp_eth_dev->ndev;
-				ndev->netdev_ops->ndo_stop(temp_ndev);
-			}
-		}
-	} else {
-		ndev->netdev_ops->ndo_stop(ndev);
-	}
-	adrv906x_ndma_open(ndma_dev,
-			   adrv906x_ndma_loopback_tx_callback,
-			   adrv906x_ndma_loopback_rx_callback,
-			   tpriv, NULL, true);
-	tx_data1 = netdev_alloc_skb(ndev, NDMA_LOOPBACK_TEST_SIZE);
-	skb_put(tx_data1, NDMA_LOOPBACK_TEST_SIZE);
-	p = tx_data1->data;
-	for (i = 0; i < NDMA_LOOPBACK_TEST_SIZE; i++) {
-		*p = NDMA_LOOPBACK_TEST_PATTERN;
-		p++;
-	}
-	ret = adrv906x_ndma_start_xmit(ndma_dev, tx_data1, port, 0, 0);
-	if (ret) {
-		netdev_printk(KERN_DEBUG, ndev, "ndma tx failed to send frame:0x%x", ret);
-		ret = -EIO;
-		dev_kfree_skb(tx_data1);
-		goto out;
-	}
-	tmo = wait_for_completion_timeout(&tpriv->completion, ADRV906X_LB_TIMEOUT);
-	if (!tmo) {
-		netdev_printk(KERN_DEBUG, ndev, "ndma loopback test timeout");
-		ret = -ETIMEDOUT;
-	}
-	if (!tpriv->ok) {
-		netdev_printk(KERN_DEBUG, ndev, "ndma loopback test failed");
-		ret = -EINVAL;
-	}
-out:
-	adrv906x_ndma_close(ndma_dev, NULL);
-	if (all_down) {
-		for (i = 0; i < MAX_NETDEV_NUM; i++) {
-			temp_eth_dev = eth_if->adrv906x_dev[i];
-			temp_ndev = temp_eth_dev->ndev;
-			ndev->netdev_ops->ndo_open(temp_ndev);
-		}
-	} else {
-		ndev->netdev_ops->ndo_open(ndev);
-	}
-	kfree(tpriv);
+	return 0;
+}
+
+static int adrv906x_loopback_test_common(struct net_device *ndev,
+					 int (*config_loopback)(struct net_device *, bool))
+{
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
+	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
+	struct adrv906x_loopback_test_attrs attr = { };
+	int ret;
+
+	/* Enable loopback mode */
+	config_loopback(ndev, true);
+	ndev->netdev_ops->ndo_open(ndev);
+	if (eth_if->ethswitch.enabled)
+		adrv906x_switch_port_reset(es);
+
+	msleep(100);
+
+	/* Run the loopback test */
+	attr.dst = ndev->dev_addr;
+	attr.timeout = ADRV906X_LB_TIMEOUT;
+	ret = adrv906x_test_near_end_loopback_run(ndev, &attr);
+
+	/* Disable loopback mode */
+	if (eth_if->ethswitch.enabled)
+		adrv906x_switch_port_reset(es);
+	ndev->netdev_ops->ndo_stop(ndev);
+	config_loopback(ndev, false);
+
+	msleep(100);
+
+	return ret;
+}
+
+static int adrv906x_phy_loopback_test(struct net_device *ndev)
+{
+	int ret;
+
+	ret = adrv906x_loopback_test_common(ndev, adrv906x_phy_loopback_config);
+	netdev_printk(KERN_DEBUG, ndev, "near-end loopback test result: %d", ret);
+
+	return ret;
+}
+
+static int adrv906x_ndma_loopback_test(struct net_device *ndev)
+{
+	int ret;
+
+	ret = adrv906x_loopback_test_common(ndev, adrv906x_ndma_loopback_config);
+	netdev_printk(KERN_DEBUG, ndev, "ndma loopback test result: %d", ret);
+
 	return ret;
 }
 
 struct adrv906x_test adrv906x_ethtool_selftests[] = {
 	{
-		.name = "Near-end loopback",
-		.fn = adrv906x_test_near_end_loopback_test,
+		.name = "NDMA loopback",
+		.fn = adrv906x_ndma_loopback_test,
 		.etest_flag = ETH_TEST_FL_OFFLINE,
 	},
 	{
-		.name = "NDMA loopback",
-		.fn = adrv906x_ndma_loopback_test,
+		.name = "Near-end loopback",
+		.fn = adrv906x_phy_loopback_test,
 		.etest_flag = ETH_TEST_FL_OFFLINE,
 	},
 };
@@ -933,9 +845,36 @@ struct adrv906x_test adrv906x_ethtool_selftests[] = {
 static void adrv906x_ethtool_selftest_run(struct net_device *ndev, struct ethtool_test *etest,
 					  u64 *buf)
 {
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct adrv906x_ndma_dev *ndma_dev = adrv906x_dev->ndma_dev;
+	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
+	bool dev_was_running[MAX_NETDEV_NUM] = {false};
+	bool check_all_interfaces = false;
+	struct net_device *temp_ndev;
 	unsigned char etest_flags = etest->flags;
+	int port = adrv906x_dev->port;
 	int i, ret;
 
+	/* Check if multiple interfaces share the NDMA device */
+	check_all_interfaces = eth_if->ethswitch.enabled && kref_read(&ndma_dev->refcount) > 1;
+
+	/* Stop all running interfaces before tests */
+	if (check_all_interfaces) {
+		for (i = 0; i < MAX_NETDEV_NUM; i++) {
+			temp_ndev = eth_if->adrv906x_dev[i]->ndev;
+			dev_was_running[i] = netif_running(temp_ndev);
+			if (dev_was_running[i])
+				ndev->netdev_ops->ndo_stop(temp_ndev);
+		}
+	} else {
+		dev_was_running[port] = netif_running(ndev);
+		if (dev_was_running[port])
+			ndev->netdev_ops->ndo_stop(ndev);
+	}
+
+	msleep(1500);
+
+	/* Run all tests */
 	for (i = 0; i < ARRAY_SIZE(adrv906x_ethtool_selftests); i++) {
 		ret = 1;
 		if (etest_flags == adrv906x_ethtool_selftests[i].etest_flag) {
@@ -945,6 +884,21 @@ static void adrv906x_ethtool_selftest_run(struct net_device *ndev, struct ethtoo
 		}
 		buf[i] = ret;
 	}
+
+	/* Restore previously running interfaces */
+	if (check_all_interfaces) {
+		for (i = 0; i < MAX_NETDEV_NUM; i++) {
+			if (dev_was_running[i]) {
+				temp_ndev = eth_if->adrv906x_dev[i]->ndev;
+				ndev->netdev_ops->ndo_open(temp_ndev);
+			}
+		}
+	} else {
+		if (dev_was_running[port])
+			ndev->netdev_ops->ndo_open(ndev);
+	}
+
+	msleep(1500);
 }
 
 const struct ethtool_ops adrv906x_ethtool_ops = {

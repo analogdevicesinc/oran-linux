@@ -14,6 +14,7 @@
 #include "adrv906x-phy-serdes.h"
 #include "adrv906x-net.h"
 #include "adrv906x-tsu.h"
+#include "adrv906x-cmn.h"
 
 struct adrv906x_phy_hw_stat {
 	const char *string;
@@ -253,7 +254,7 @@ static int adrv906x_phy_read_status(struct phy_device *phydev)
 
 	val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_STAT1);
 
-	if (phydev->dev_flags & ADRV906X_PHY_FLAGS_LOOPBACK_TEST)
+	if (phydev->loopback_enabled)
 		phydev->link = 1;
 	else
 		phydev->link = !!(val & MDIO_STAT1_LSTATUS);
@@ -275,6 +276,20 @@ static int adrv906x_phy_read_status(struct phy_device *phydev)
 
 static int adrv906x_phy_set_loopback(struct phy_device *phydev, bool enable)
 {
+	struct net_device *netdev = phydev->attached_dev;
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(netdev);
+
+	if (enable) {
+		adrv906x_phy_tx_path_enable(phydev, false);
+		adrv906x_phy_rx_path_enable(phydev, false);
+		adrv906x_cmn_set_phy_loopback(adrv906x_dev, true);
+		adrv906x_phy_tx_path_enable(phydev, true);
+		adrv906x_phy_rx_path_enable(phydev, true);
+	} else {
+		adrv906x_cmn_set_phy_loopback(adrv906x_dev, false);
+		adrv906x_phy_rx_path_enable(phydev, false);
+	}
+
 	return 0;
 }
 
@@ -342,9 +357,11 @@ static int adrv906x_phy_config_aneg(struct phy_device *phydev)
 	if (ret)
 		return ret;
 
-	ret = adrv906x_serdes_lnk_up_req(phydev);
-	if (ret)
-		return ret;
+	if (!phydev->loopback_enabled) {
+		ret = adrv906x_serdes_lnk_up_req(phydev);
+		if (ret)
+			return ret;
+	}
 
 	return genphy_c45_an_disable_aneg(phydev);
 }

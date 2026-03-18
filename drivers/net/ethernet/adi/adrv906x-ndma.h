@@ -127,7 +127,7 @@ struct adrv906x_ndma_chan {
 	void __iomem *ctrl_base;
 	union adrv906x_ndma_chan_stats stats;
 	ndma_pkt_callback status_cb_fn;
-	void *status_cb_param;
+	void *cb_param;
 	spinlock_t lock; /* protects struct and register access */
 	unsigned char exp_seq_num;
 	unsigned char seq_num;
@@ -216,9 +216,10 @@ int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 			bool switch_enabled);
 void adrv906x_ndma_remove(struct adrv906x_ndma_dev *ndma_dev);
 void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx_cb_fn,
-			ndma_pkt_callback rx_cb_fn, void *cb_param, ndma_flood_callback flood_cb_fn,
-			bool loopback_mode);
+			ndma_pkt_callback rx_cb_fn, void *cb_param,
+			ndma_flood_callback flood_cb_fn);
 void adrv906x_ndma_close(struct adrv906x_ndma_dev *ndma_dev, struct net_device *ndev);
+void adrv906x_ndma_config_loopback(struct adrv906x_ndma_dev *ndma_dev, bool enable);
 void adrv906x_ndma_update_frame_drop_stats(struct adrv906x_ndma_dev *ndma_dev);
 
 #endif /* __ADRV906X_NDMA_H__ */

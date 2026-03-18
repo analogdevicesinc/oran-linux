@@ -929,7 +929,7 @@ static void adrv906x_dma_tx_prep_desc_list(struct adrv906x_ndma_chan *ndma_ch)
 		/* Defer transmission of the next packet until the status
 		 * for the PTP packet is received
 		 */
-		if (FIELD_GET(NDMA_TX_HDR_SOF_FR_PTP, skb->data[0]))
+		if (skb && FIELD_GET(NDMA_TX_HDR_SOF_FR_PTP, skb->data[0]))
 			break;
 	}
 
@@ -1056,6 +1056,11 @@ static void adrv906x_ndma_tx_recovery_handler(struct work_struct *work)
 
 	while (ndma_ch->tx_frames_pending) {
 		skb = ndma_ch->tx_buffs[ndma_ch->tx_tail];
+		if (!skb) {
+			ndma_ch->tx_tail = (ndma_ch->tx_tail + 1) % NDMA_TX_RING_SIZE;
+			continue;
+		}
+
 		port = FIELD_GET(NDMA_TX_HDR_SOF_PORT_ID, skb->data[0]);
 		addr = ndma_ch->tx_ring[ndma_ch->tx_tail].start;
 		size = ndma_ch->tx_ring[ndma_ch->tx_tail].xcnt *
@@ -1072,7 +1077,7 @@ static void adrv906x_ndma_tx_recovery_handler(struct work_struct *work)
 			ndma_ch->exp_seq_num = (ndma_ch->exp_seq_num < NDMA_TX_MAX_SEQNUM) ?
 					       ndma_ch->exp_seq_num + 1 : NDMA_TX_MIN_SEQNUM;
 
-		ndma_ch->status_cb_fn(skb, port, NULL, ndma_ch->status_cb_param);
+		ndma_ch->status_cb_fn(skb, port, NULL, ndma_ch->cb_param);
 		ndma_ch->tx_frames_pending--;
 	}
 
@@ -1282,19 +1287,25 @@ static int adrv906x_ndma_alloc_rings(struct adrv906x_ndma_dev *ndma_dev)
 	return 0;
 }
 
-static void adrv906x_ndma_config_loopback(struct adrv906x_ndma_dev *ndma_dev, bool enable)
+void adrv906x_ndma_config_loopback(struct adrv906x_ndma_dev *ndma_dev, bool enable)
 {
 	struct adrv906x_ndma_chan *rx_chan = &ndma_dev->rx_chan;
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
+	unsigned long flags;
 	unsigned int val;
 
-	if (ndma_dev->loopback_en == enable)
+	spin_lock_irqsave(&tx_chan->lock, flags);
+
+	if (ndma_dev->loopback_en == enable) {
+		spin_unlock_irqrestore(&tx_chan->lock, flags);
 		return;
+	}
+
+	ndma_dev->loopback_en = enable;
 
 	val = ioread32(rx_chan->ctrl_base + NDMA_RX_STAT_AND_CTRL);
 	if (enable) {
 		val |= NDMA_LOOPBACK_EN;
-		ndma_dev->loopback_en = true;
 		tx_chan->tx_loopback_wu[0] = NDMA_TX_HDR_TYPE_LOOPBACK;
 		tx_chan->tx_loopback_addr = dma_map_single(ndma_dev->dev, tx_chan->tx_loopback_wu,
 							   NDMA_TX_HDR_LOOPBACK_SIZE,
@@ -1306,12 +1317,13 @@ static void adrv906x_ndma_config_loopback(struct adrv906x_ndma_dev *ndma_dev, bo
 		tx_chan->tx_loopback_desc.start = tx_chan->tx_loopback_addr;
 	} else {
 		val &= ~NDMA_LOOPBACK_EN;
-		ndma_dev->loopback_en = false;
 
 		dma_unmap_single(ndma_dev->dev, tx_chan->tx_loopback_addr,
 				 NDMA_TX_HDR_LOOPBACK_SIZE, DMA_TO_DEVICE);
 	}
 	iowrite32(val, rx_chan->ctrl_base + NDMA_RX_STAT_AND_CTRL);
+
+	spin_unlock_irqrestore(&tx_chan->lock, flags);
 }
 
 static u32 adrv906x_ndma_mac_hash(const u8 *mac)
@@ -1395,13 +1407,13 @@ static void adrv906x_ndma_clear_mac_table(struct adrv906x_ndma_dev *ndma_dev)
 }
 
 void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx_cb_fn,
-			ndma_pkt_callback rx_cb_fn, void *cb_param, ndma_flood_callback flood_cb_fn,
-			bool loopback_mode)
+			ndma_pkt_callback rx_cb_fn, void *cb_param,
+			ndma_flood_callback flood_cb_fn)
 {
 	struct adrv906x_ndma_chan *rx_chan = &ndma_dev->rx_chan;
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
+	struct net_device *ndev = (struct net_device *)cb_param;
 	unsigned long flags0, flags1;
-	struct net_device *ndev;
 
 	spin_lock_irqsave(&ndma_dev->lock, flags0);
 	if (!ndma_dev->enabled) {
@@ -1412,7 +1424,6 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 		adrv906x_ndma_config_rx_filter(ndma_dev);
 		adrv906x_ndma_set_frame_size(ndma_dev);
 		adrv906x_ndma_set_tx_timeout_value(ndma_dev, NDMA_TX_TS_DELAY);
-		adrv906x_ndma_config_loopback(ndma_dev, loopback_mode);
 
 		spin_lock_irqsave(&tx_chan->lock, flags1);
 		adrv906x_dma_rx_reset(tx_chan);
@@ -1427,7 +1438,7 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 		spin_unlock_irqrestore(&rx_chan->lock, flags1);
 
 		tx_chan->status_cb_fn = tx_cb_fn;
-		tx_chan->status_cb_param = cb_param;
+		tx_chan->cb_param = cb_param;
 		tx_chan->rx_head = 0;
 		tx_chan->rx_tail = 0;
 		tx_chan->rx_free = 0;
@@ -1444,7 +1455,7 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 
 		rx_chan->exp_seq_num = 0;
 		rx_chan->status_cb_fn = rx_cb_fn;
-		rx_chan->status_cb_param = cb_param;
+		rx_chan->cb_param = cb_param;
 		rx_chan->rx_head = 0;
 		rx_chan->rx_tail = 0;
 		rx_chan->rx_free = 0;
@@ -1461,23 +1472,18 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 					  NDMA_TX_STATUS_DMA_DONE_IRQ);
 
 		ndma_dev->flood_cb_fn = flood_cb_fn;
+		ndma_dev->ndev = ndev;
 		ndma_dev->enabled = true;
 		kref_init(&ndma_dev->refcount);
 	} else {
 		kref_get(&ndma_dev->refcount);
 	}
 
-	if (!loopback_mode) {
-		ndev = (struct net_device *)cb_param;
-		ndma_dev->ndev = ndev;
-	}
-
 	mod_delayed_work(system_long_wq, &ndma_dev->update_stats, msecs_to_jiffies(1000));
 	spin_unlock_irqrestore(&ndma_dev->lock, flags0);
 
 	/* Add the net device MAC address to the MAC filter list */
-	if (!loopback_mode)
-		adrv906x_ndma_add_mac(ndma_dev, ndev->dev_addr);
+	adrv906x_ndma_add_mac(ndma_dev, ndev->dev_addr);
 }
 
 static void adrv906x_ndma_stop(struct kref *ref)
@@ -1525,6 +1531,11 @@ static void adrv906x_ndma_stop(struct kref *ref)
 	num_frames = tx_chan->tx_frames_waiting + tx_chan->tx_frames_pending;
 	while (num_frames--) {
 		skb = tx_chan->tx_buffs[tx_chan->tx_tail];
+		if (!skb) {
+			tx_chan->tx_tail = (tx_chan->tx_tail + 1) % NDMA_TX_RING_SIZE;
+			continue;
+		}
+
 		port = FIELD_GET(NDMA_TX_HDR_SOF_PORT_ID, skb->data[0]);
 		addr = tx_chan->tx_ring[tx_chan->tx_tail].start;
 		size = tx_chan->tx_ring[tx_chan->tx_tail].xcnt *
@@ -1533,7 +1544,7 @@ static void adrv906x_ndma_stop(struct kref *ref)
 
 		tx_chan->tx_buffs[tx_chan->tx_tail] = NULL;
 		tx_chan->tx_tail = (tx_chan->tx_tail + 1) % NDMA_TX_RING_SIZE;
-		tx_chan->status_cb_fn(skb, port, NULL, tx_chan->status_cb_param);
+		tx_chan->status_cb_fn(skb, port, NULL, tx_chan->cb_param);
 	}
 	tx_chan->tx_frames_pending = 0;
 	tx_chan->tx_frames_waiting = 0;
@@ -1547,8 +1558,7 @@ void adrv906x_ndma_close(struct adrv906x_ndma_dev *ndma_dev, struct net_device *
 {
 	kref_put(&ndma_dev->refcount, adrv906x_ndma_stop);
 
-	if (!ndma_dev->loopback_en)
-		adrv906x_ndma_remove_mac(ndma_dev, ndev->dev_addr);
+	adrv906x_ndma_remove_mac(ndma_dev, ndev->dev_addr);
 }
 
 static int adrv906x_ndma_parse_rx_status_header(struct adrv906x_ndma_chan *ndma_ch,
@@ -1739,8 +1749,7 @@ static void adrv906x_ndma_process_rx_work_unit(struct adrv906x_ndma_chan *rx_cha
 			if (!pktbuf)
 				goto consume;
 
-			rx_chan->status_cb_fn(pktbuf, port_id, &ts,
-					      rx_chan->status_cb_param);
+			rx_chan->status_cb_fn(pktbuf, port_id, &ts, rx_chan->cb_param);
 
 			spin_lock_irqsave(&tx_chan->lock, flags);
 			if (port_id == 0)
@@ -1918,8 +1927,12 @@ static int adrv906x_ndma_process_tx_status(struct adrv906x_ndma_chan *ndma_ch,
 	}
 
 	ndma_ch->tx_buffs[ndma_ch->tx_tail] = NULL;
-	ndma_ch->tx_tail = (ndma_ch->tx_tail + 1) % NDMA_TX_RING_SIZE;
-	ndma_ch->status_cb_fn(skb, port, invalid_ts ? NULL : &ts, ndma_ch->status_cb_param);
+	if (ndma_dev->loopback_en)
+		ndma_ch->tx_tail = (ndma_ch->tx_tail + 2) % NDMA_TX_RING_SIZE;
+	else
+		ndma_ch->tx_tail = (ndma_ch->tx_tail + 1) % NDMA_TX_RING_SIZE;
+
+	ndma_ch->status_cb_fn(skb, port, invalid_ts ? NULL : &ts, ndma_ch->cb_param);
 
 	if (--ndma_ch->tx_frames_pending == 0) {
 		cancel_delayed_work(&ndma_ch->tx_frames_timeout_work);
@@ -2006,6 +2019,7 @@ int adrv906x_ndma_start_xmit(struct adrv906x_ndma_dev *ndma_dev, struct sk_buff 
 	ndma_ch->tx_ring[ndma_ch->tx_head].cfg |= wdsize;
 	ndma_ch->tx_head = (ndma_ch->tx_head + 1) % NDMA_TX_RING_SIZE;
 	if (ndma_dev->loopback_en) {
+		ndma_ch->tx_buffs[ndma_ch->tx_head] = NULL;
 		ndma_ch->tx_ring[ndma_ch->tx_head] = ndma_ch->tx_loopback_desc;
 		ndma_ch->tx_head = (ndma_ch->tx_head + 1) % NDMA_TX_RING_SIZE;
 	}
