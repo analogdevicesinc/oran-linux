@@ -836,23 +836,23 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 			return -ENOMEM;
 		}
 
-		/* Initialize to hardware default PVID after reset */
+		/* Initialize to hardware default PVID after reset but exempt the CPU port */
 		es->switch_port[i].pvid = SWITCH_PVID;
-		/* no vlan tag processing on CPU port */
 		if (i != SWITCH_CPU_PORT) {
 			ret = of_property_read_u16(switch_port_np, "pvid", &pvid);
-			if (ret < 0) {
+			if (ret < 0)
 				pvid = SWITCH_PVID;
-				of_node_put(switch_port_np);
-			}
 			if (pvid == 0 || pvid >= VLAN_N_VID - 1) {
 				dev_warn(dev, "invalid pvid %u from DT, using default %u",
 					 pvid, SWITCH_PVID);
 				pvid = SWITCH_PVID;
 			}
 			ret = adrv906x_switch_pvid_set(es, i, pvid);
-			if (ret)
+			if (ret) {
+				of_node_put(switch_port_np);
+                dev_err(dev, "failed setting pvid %u for port %u", pvid, i);
 				return ret;
+			}
 		}
 		i++;
 	}
