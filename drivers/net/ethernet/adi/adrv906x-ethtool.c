@@ -687,14 +687,14 @@ out:
 	return 0;
 }
 
-static int adrv906x_test_near_end_loopback_run(struct net_device *ndev,
-					       struct adrv906x_loopback_test_attrs *attr)
+static int adrv906x_test_loopback_run(struct net_device *ndev,
+				      struct adrv906x_loopback_test_attrs *attr)
 {
 	struct adrv906x_test_priv *tpriv;
 	struct sk_buff *skb = NULL;
 	int ret;
 
-	netdev_printk(KERN_DEBUG, ndev, "adrv906x_test_near_end_loopback_run");
+	netdev_printk(KERN_DEBUG, ndev, "adrv906x_test_loopback_run");
 	tpriv = kzalloc(sizeof(*tpriv), GFP_KERNEL);
 	if (!tpriv)
 		return -ENOMEM;
@@ -766,11 +766,21 @@ static int adrv906x_ndma_loopback_config(struct net_device *ndev, bool enable)
 	struct adrv906x_ndma_dev *ndma_dev = adrv906x_dev->ndma_dev;
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
+	struct adrv906x_mac *mac = &adrv906x_dev->mac;
 	struct phy_device *phydev = ndev->phydev;
 
-	adrv906x_switch_port_enable(es, SWITCH_CPU_PORT, !enable);
 	adrv906x_ndma_config_loopback(ndma_dev, enable);
-	/* Set PHY loopback to disable communication with the seres app */
+
+	/* When NDMA loopback is enabled, also enable PHY loopback to prevent
+	 * communication with the SerDes application. Additionally, block all NDMA
+	 * egress traffic by disabling the switch CPU port or the MAC data path,
+	 * depending on the current configuration.
+	 */
+	if (es->enabled)
+		adrv906x_switch_port_enable(es, SWITCH_CPU_PORT, !enable);
+	else
+		adrv906x_mac_set_path(mac, !enable);
+
 	phy_loopback(phydev, enable);
 
 	return 0;
@@ -796,7 +806,7 @@ static int adrv906x_loopback_test_common(struct net_device *ndev,
 	/* Run the loopback test */
 	attr.dst = ndev->dev_addr;
 	attr.timeout = ADRV906X_LB_TIMEOUT;
-	ret = adrv906x_test_near_end_loopback_run(ndev, &attr);
+	ret = adrv906x_test_loopback_run(ndev, &attr);
 
 	/* Disable loopback mode */
 	if (eth_if->ethswitch.enabled)
