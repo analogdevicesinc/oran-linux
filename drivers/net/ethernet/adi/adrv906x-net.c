@@ -42,6 +42,12 @@
 static char *macaddr[MAX_NETDEV_NUM];
 module_param_array(macaddr, charp, NULL, 0644);
 MODULE_PARM_DESC(macaddr, "set dev0 and dev1 mac addresses via kernel module parameter");
+
+/* Default multicast MAC addresses for protocol filtering:
+ * - 0x0000011B19000000: PTP peer delay forwardable messages (01:1B:19:00:00:00)
+ * - 0x00000180C200000E: LLDP multicast address (01:80:C2:00:00:0E)
+ * - 0x00000180C2000003: IEEE 802.1X PAE group address (01:80:C2:00:00:03)
+ */
 static u64 default_multicast_list[MAX_MULTICAST_FILTERS] = {
 	0x0000011B19000000, 0x00000180C200000E, 0x00000180C2000003
 };
@@ -442,11 +448,15 @@ static int adrv906x_set_hwtstamp_config(struct net_device *ndev, struct ifreq *i
 
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_OFF:
-		/* TODO  clear timestamp flag */
+		/* Timestamp flag is checked per-packet via SKBTX_HW_TSTAMP,
+		 * no global configuration needed
+		 */
 		break;
 
 	case HWTSTAMP_TX_ON:
-		/* TODO  set timestamp flag */
+		/* Timestamp flag is checked per-packet via SKBTX_HW_TSTAMP,
+		 * no global configuration needed
+		 */
 		break;
 
 	default:
