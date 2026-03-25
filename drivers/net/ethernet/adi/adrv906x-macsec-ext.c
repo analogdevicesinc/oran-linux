@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/if_vlan.h>
 #include "adrv906x-macsec-ext.h"
 
 #define ADRV906X_MAX_TX_KEYS            4
@@ -51,7 +52,7 @@ u32  cco_macsec_reg_rd(struct net_device *netdev, unsigned long addr)
 
 void cco_macsec_max_framesize_get(struct net_device *netdev, u32 *max_framesize)
 {
-	*max_framesize = netdev->mtu + 14 + 8; // DMAC, SMAC, EthType, 2 VLAN tags
+	*max_framesize = netdev->mtu + ETH_HLEN + (2 * VLAN_HLEN);
 }
 
 /*

@@ -240,7 +240,7 @@ static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u1
 
 	val = ioread32(es->switch_port[port].reg + SWITCH_PORT_CFG_VLAN);
 	val &= ~SWITCH_PORT_PVID_MASK;
-	val |= pvid;
+	val |= FIELD_PREP(SWITCH_PORT_PVID_MASK, pvid);
 	iowrite32(val, es->switch_port[port].reg + SWITCH_PORT_CFG_VLAN);
 
 	old_pvid = es->switch_port[port].pvid;
@@ -525,7 +525,7 @@ static ssize_t port_vlan_ctrl_show(struct device *dev,
 	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
 		io = es->switch_port[i].reg;
 		reg = ioread32(io + SWITCH_PORT_CFG_VLAN);
-		reg &= SWITCH_PORT_PVID_MASK;
+		reg = FIELD_GET(SWITCH_PORT_PVID_MASK, reg);
 		char_cnt += sprintf(buf + char_cnt, "%-8d%-4d\n", i, reg);
 	}
 	char_cnt += sprintf(buf + char_cnt, "%-8s%-4s\n", "vid", "port");
@@ -649,7 +649,7 @@ static void adrv906x_switch_update_hw_stats(struct work_struct *work)
 {
 	struct adrv906x_eth_switch *es = container_of(work, struct adrv906x_eth_switch,
 						      update_stats.work);
-	unsigned int val;
+	u32 val;
 	int i;
 
 	rtnl_lock();

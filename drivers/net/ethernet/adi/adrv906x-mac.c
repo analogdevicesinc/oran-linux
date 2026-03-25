@@ -16,7 +16,7 @@
 void adrv906x_mac_promiscuous_mode_en(struct adrv906x_mac *mac)
 {
 	void __iomem *emac_rx = mac->emac_rx;
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(emac_rx + MAC_RX_CTRL);
 	val |= MAC_RX_PROMISCUOUS_MODE_EN;
@@ -26,7 +26,7 @@ void adrv906x_mac_promiscuous_mode_en(struct adrv906x_mac *mac)
 void adrv906x_mac_promiscuous_mode_dis(struct adrv906x_mac *mac)
 {
 	void __iomem *emac_rx = mac->emac_rx;
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(emac_rx + MAC_RX_CTRL);
 	val &= ~MAC_RX_PROMISCUOUS_MODE_EN;
@@ -36,7 +36,7 @@ void adrv906x_mac_promiscuous_mode_dis(struct adrv906x_mac *mac)
 static void adrv906x_mac_tx_path_en(struct adrv906x_mac *mac)
 {
 	void __iomem *emac_tx = mac->emac_tx;
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(emac_tx + MAC_TX_CTRL);
 	val |= MAC_TX_PATH_EN;
@@ -46,7 +46,7 @@ static void adrv906x_mac_tx_path_en(struct adrv906x_mac *mac)
 static void adrv906x_mac_tx_path_dis(struct adrv906x_mac *mac)
 {
 	void __iomem *emac_tx = mac->emac_tx;
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(emac_tx + MAC_TX_CTRL);
 	val &= ~MAC_TX_PATH_EN;
@@ -56,7 +56,7 @@ static void adrv906x_mac_tx_path_dis(struct adrv906x_mac *mac)
 void adrv906x_mac_rx_path_en(struct adrv906x_mac *mac)
 {
 	void __iomem *emac_rx = mac->emac_rx;
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(emac_rx + MAC_RX_CTRL);
 	val |= MAC_RX_PATH_EN;
@@ -66,7 +66,7 @@ void adrv906x_mac_rx_path_en(struct adrv906x_mac *mac)
 void adrv906x_mac_rx_path_dis(struct adrv906x_mac *mac)
 {
 	void __iomem *emac_rx = mac->emac_rx;
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(emac_rx + MAC_RX_CTRL);
 	val &= ~MAC_RX_PATH_EN;
@@ -87,7 +87,7 @@ void adrv906x_mac_set_path(struct adrv906x_mac *mac, bool enable)
 void adrv906x_mac_set_multicast_filter(struct adrv906x_mac *mac, u64 mac_addr, int filter_id)
 {
 	void __iomem *emac_rx = mac->emac_rx;
-	unsigned int low, high, val;
+	u32 low, high, val;
 
 	low = FIELD_GET(0x0000FFFFFFFF, mac_addr);
 	high = FIELD_GET(0xFFFF00000000, mac_addr);
@@ -99,9 +99,9 @@ void adrv906x_mac_set_multicast_filter(struct adrv906x_mac *mac, u64 mac_addr, i
 	iowrite32(val, emac_rx + MAC_RX_CTRL);
 }
 
-static void adrv906x_mac_set_mfs(struct adrv906x_mac *mac, unsigned int mfs)
+static void adrv906x_mac_set_mfs(struct adrv906x_mac *mac, u32 mfs)
 {
-	unsigned int val_tx, val_rx;
+	u32 val_tx, val_rx;
 
 	val_tx = ioread32(mac->emac_tx + MAC_TX_CTRL);
 	val_rx = ioread32(mac->emac_rx + MAC_RX_CTRL);
@@ -118,7 +118,7 @@ static void adrv906x_mac_set_mfs(struct adrv906x_mac *mac, unsigned int mfs)
 static void adrv906x_mac_update_general_stats(void __iomem *base,
 					      struct adrv906x_mac_general_stats *gs)
 {
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(base + GMAC_STAT_DROP_EVENTS);
 	gs->drop_events += val;
@@ -154,7 +154,7 @@ static void adrv906x_mac_update_general_stats(void __iomem *base,
 
 static void adrv906x_mac_update_tx_stats(struct adrv906x_mac *mac)
 {
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(mac->emac_tx + MAC_TX_STAT_UNDERFLOW);
 	mac->hw_stats_tx.underflow += val;
@@ -166,7 +166,7 @@ static void adrv906x_mac_update_tx_stats(struct adrv906x_mac *mac)
 
 static void adrv906x_mac_update_rx_stats(struct adrv906x_mac *mac)
 {
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(mac->emac_rx + MAC_RX_STAT_OVERFLOW);
 	mac->hw_stats_rx.overflow += val;
@@ -188,7 +188,7 @@ static void adrv906x_mac_update_rx_stats(struct adrv906x_mac *mac)
 
 static void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac)
 {
-	unsigned int val;
+	u32 val;
 
 	rtnl_lock();
 
@@ -241,7 +241,7 @@ void adrv906x_mac_cleanup(struct adrv906x_mac *mac)
 	cancel_delayed_work(&mac->update_stats);
 }
 
-int adrv906x_mac_init(struct adrv906x_mac *mac, unsigned int size)
+int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size)
 {
 	adrv906x_mac_set_mfs(mac, size);
 

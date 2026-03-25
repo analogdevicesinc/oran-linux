@@ -74,7 +74,7 @@ void adrv906x_eth_cmn_pll_reset(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
-	unsigned int val;
+	u32 val;
 
 	/*
 	 * Both front‑haul ports are now down. Wait 50 ms so the switch driver can
@@ -99,7 +99,7 @@ void adrv906x_eth_cmn_pll_reset(struct net_device *ndev)
 
 static void adrv906x_eth_cmn_serdes_4pack_reset(void __iomem *regs)
 {
-	unsigned int val;
+	u32 val;
 
 	val = ioread32(regs + EMAC_CMN_PHY_CTRL);
 
@@ -131,7 +131,7 @@ void adrv906x_eth_cmn_ser_tx_sync_trigger(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
-	unsigned int val, bit_mask;
+	u32 val, bit_mask;
 
 	mutex_lock(&eth_if->mtx);
 
@@ -152,7 +152,7 @@ void adrv906x_eth_cmn_ser_pwr_down(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
-	unsigned int val, bit_mask;
+	u32 val, bit_mask;
 
 	mutex_lock(&eth_if->mtx);
 
@@ -171,7 +171,7 @@ void adrv906x_eth_cmn_ser_pwr_up_and_reset(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
-	unsigned int val, bit_mask;
+	u32 val, bit_mask;
 
 	mutex_lock(&eth_if->mtx);
 
@@ -199,7 +199,7 @@ void adrv906x_eth_cmn_deser_pwr_down(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
-	unsigned int val, bit_mask;
+	u32 val, bit_mask;
 
 	mutex_lock(&eth_if->mtx);
 
@@ -218,7 +218,7 @@ void adrv906x_eth_cmn_deser_pwr_up_and_reset(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
-	unsigned int val, bit_mask;
+	u32 val, bit_mask;
 
 	mutex_lock(&eth_if->mtx);
 
@@ -243,7 +243,7 @@ void adrv906x_eth_cmn_deser_pwr_up_and_reset(struct net_device *ndev)
 
 int adrv906x_eth_cmn_rst_reg(void __iomem *regs)
 {
-	unsigned int val;
+	u32 val;
 
 	val = REGMAP_RESET_SWITCH
 	      | REGMAP_RESET_PCS_MAC0
@@ -296,7 +296,7 @@ void adrv906x_eth_cmn_mode_cfg(struct net_device *ndev)
 
 void adrv906x_eth_cmn_init(void __iomem *regs, bool switch_enabled, bool macsec_enabled)
 {
-	unsigned int val1, val2;
+	u32 val1, val2;
 
 	val1 = ioread32(regs + EMAC_CMN_DIGITAL_CTRL0);
 	val2 = ioread32(regs + EMAC_CMN_DIGITAL_CTRL3);
@@ -372,7 +372,7 @@ ssize_t adrv906x_cmn_recovered_clock_output_get(struct device *dev, char *buf)
 	struct adrv906x_eth_dev *adrv906x_dev;
 	int enabled, selected, result;
 	void __iomem *regs;
-	unsigned int val;
+	u32 val;
 
 	adrv906x_dev = dev_get_drvdata(dev);
 	regs = adrv906x_dev->parent->emac_cmn_regs;

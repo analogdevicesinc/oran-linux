@@ -115,7 +115,7 @@ void adrv906x_mac_rx_path_en(struct adrv906x_mac *mac);
 void adrv906x_mac_rx_path_dis(struct adrv906x_mac *mac);
 void adrv906x_mac_set_multicast_filter(struct adrv906x_mac *mac, u64 mac_addr, int filter_id);
 void adrv906x_mac_cleanup(struct adrv906x_mac *mac);
-int adrv906x_mac_init(struct adrv906x_mac *mac, unsigned int size);
+int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size);
 void adrv906x_mac_set_path(struct adrv906x_mac *mac, bool enable);
 bool adrv906x_mac_link_stable(struct adrv906x_mac *mac);
 
