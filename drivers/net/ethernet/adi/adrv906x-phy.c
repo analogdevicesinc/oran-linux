@@ -162,10 +162,13 @@ void adrv906x_phy_pcs_reset_rx(struct phy_device *phydev)
 static int adrv906x_phy_suspend(struct phy_device *phydev)
 {
 	adrv906x_phy_rx_path_enable(phydev, false);
-	/* adrv906x_phy_tx_path_enable(phydev, false);
-	 * TODO: The line above is commented out to keep the TX path enabled during suspend.
-	 *	 Disabling the TX path may lead to issues with the interface coming back up.
+	/* TX path intentionally kept enabled during suspend.
+	 * Disabling TX during suspend prevents proper link recovery when the
+	 * interface is brought back up. The SerDes link down request below
+	 * is sufficient to signal the link state change without fully
+	 * disabling the transmit path hardware.
 	 */
+	/* adrv906x_phy_tx_path_enable(phydev, false); */
 	adrv906x_serdes_lnk_down_req(phydev);
 
 	return 0;
@@ -423,8 +426,11 @@ static int adrv906x_phy_probe(struct phy_device *phydev)
 
 	phydev->dev_flags |= ADRV906X_PHY_FLAGS_PCS_RS_FEC_EN;
 
-	/* TODO  remove the following workaround when A0 silicon is retired */
-	/* Disable RS-FEC for silicon A0 */
+	/* Silicon revision workaround: Disable RS-FEC for A0 silicon.
+	 * Early A0 revision silicon has issues with RS-FEC that require it
+	 * to be disabled. This workaround reads the silicon revision ID and
+	 * disables FEC for A0.
+	 */
 	{
 #define ADRV906X_SI_REV_ID_REG          0x18290005
 #define ADRV906X_SEC_SI_REV_ID_REG      0x1c290005

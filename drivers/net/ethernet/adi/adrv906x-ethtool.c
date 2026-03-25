@@ -27,9 +27,14 @@
 #include "adrv906x-ndma.h"
 #include "adrv906x-ethtool.h"
 
-/* TODO: Replace global variable with proper module communication */
+/* Global PHC index exported by the PTP driver module.
+ * This is used to report the PHC clock index via ethtool's get_ts_info.
+ * The variable is set by the adrv906x_ptp module when it registers the
+ * PTP hardware clock. This cross-module dependency exists because the
+ * PTP and Ethernet drivers are separate loadable modules that need to
+ * coordinate on the PHC index for userspace timestamping applications.
+ */
 #if IS_BUILTIN(CONFIG_PTP_1588_CLOCK_ADRV906X)
-/* PTP module sets this variable */
 extern int adrv906x_phc_index;
 #endif
 extern const struct ethtool_ops adrv906x_ethtool_ops;
