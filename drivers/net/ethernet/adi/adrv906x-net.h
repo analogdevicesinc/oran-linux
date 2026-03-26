@@ -9,6 +9,7 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/net_tstamp.h>
+#include <linux/phylink.h>
 #include "adrv906x-ndma.h"
 #include "adrv906x-mac.h"
 #include "adrv906x-switch.h"
@@ -43,8 +44,9 @@ struct adrv906x_eth_dev {
 #if IS_ENABLED(CONFIG_MACSEC)
 	struct adrv906x_macsec_priv *macsec;
 #endif // IS_ENABLED(CONFIG_MACSEC)
+	struct phylink *phylink;
+	struct phylink_config phylink_config;
 	int port;
-	int link;
 	struct adrv906x_eth_if *parent;
 	struct rtnl_link_stats64 rtnl_stats;
 	int tx_frames_pending;

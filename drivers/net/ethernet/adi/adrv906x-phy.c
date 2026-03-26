@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_mdio.h>
+#include <linux/phy.h>
 #include <linux/sfp.h>
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
@@ -126,11 +127,13 @@ static int adrv906x_phy_get_features(struct phy_device *phydev)
 		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseSR_Full_BIT, phydev->supported);
 		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseLR_Full_BIT, phydev->supported);
 		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseLRM_Full_BIT, phydev->supported);
+		linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_NONE_BIT, phydev->supported);
 	}
 	if (val & ADRV906X_PCS_STAT2_25GBR) {
 		linkmode_set_bit(ETHTOOL_LINK_MODE_25000baseCR_Full_BIT, phydev->supported);
 		linkmode_set_bit(ETHTOOL_LINK_MODE_25000baseKR_Full_BIT, phydev->supported);
 		linkmode_set_bit(ETHTOOL_LINK_MODE_25000baseSR_Full_BIT, phydev->supported);
+		linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_NONE_BIT, phydev->supported);
 		linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->supported);
 	}
 
@@ -191,8 +194,8 @@ static void adrv906x_phy_link_change_notify(struct phy_device *phydev)
 		return;
 	}
 
-	/* We need a dummy read to get the correct value. */
-	phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2);
+	/* Verify PCS block lock status */
+	phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2); /* Dummy read */
 	val = phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2);
 	if (!(val & ADRV906X_PCS_BRMGBT_STAT2_LBLKLK)) {
 		phydev_warn(phydev, "pcs not locked and synced to the ethernet block");
@@ -201,8 +204,7 @@ static void adrv906x_phy_link_change_notify(struct phy_device *phydev)
 
 	val = phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_RS_FEC_CTRL_REG);
 	if (val & ADRV906X_PCS_RS_FEC_CTRL_EN) {
-		val = phy_read_mmd(phydev, MDIO_MMD_PCS,
-				   ADRV906X_PCS_RS_FEC_STAT_REG);
+		val = phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_RS_FEC_STAT_REG);
 		if (!(val & ADRV906X_PCS_RS_FEC_STAT_ALIGN)) {
 			phydev_warn(phydev, "rs-fec is not locked and aligned");
 			return;
@@ -237,8 +239,8 @@ static void adrv906x_phy_link_change_notify(struct phy_device *phydev)
 	adrv906x_tsu_calculate_phy_delay(tsu, phydev->speed, rs_fec_enabled,
 					 bit_slip, buf_delay_tx, buf_delay_rx);
 
-	phydev_info(phydev, "static phy delay tx: 0x%08x", tsu->phy_delay_tx);
-	phydev_info(phydev, "static phy delay rx: 0x%08x", tsu->phy_delay_rx);
+	phydev_info(phydev, "phy static delay: tx=0x%08x rx=0x%08x",
+		    tsu->phy_delay_tx, tsu->phy_delay_rx);
 
 	adrv906x_tsu_set_phy_delay(tsu);
 }
@@ -253,25 +255,38 @@ static int adrv906x_phy_resume(struct phy_device *phydev)
 
 static int adrv906x_phy_read_status(struct phy_device *phydev)
 {
+	bool pcs_block_lock;
 	int val;
 
-	val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_STAT1);
-
-	if (phydev->loopback_enabled)
+	if (phydev->loopback_enabled) {
 		phydev->link = 1;
-	else
-		phydev->link = !!(val & MDIO_STAT1_LSTATUS);
+		pcs_block_lock = true;
+	} else {
+		phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2); /* Dummy read */
+		val = phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2);
+		pcs_block_lock = !!(val & ADRV906X_PCS_BRMGBT_STAT2_LBLKLK);
+
+		/* Link is only considered up if both link status and PCS lock are OK */
+		val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_STAT1);
+		phydev->link = !!(val & MDIO_STAT1_LSTATUS) && pcs_block_lock;
+
+		if ((val & MDIO_STAT1_LSTATUS) && !pcs_block_lock)
+			phydev_dbg(phydev, "link status ok but pcs not locked");
+	}
 
 	val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_CTRL2);
 	if ((val & ADRV906X_PCS_CTRL2_TYPE_SEL_MSK) == MDIO_PCS_CTRL2_10GBR) {
 		phydev->speed = SPEED_10000;
 		phydev->duplex = DUPLEX_FULL;
+		phydev->interface = PHY_INTERFACE_MODE_10GBASER;
 	} else if ((val & ADRV906X_PCS_CTRL2_TYPE_SEL_MSK) == ADRV906X_PCS_CTRL2_25GBR) {
 		phydev->speed = SPEED_25000;
 		phydev->duplex = DUPLEX_FULL;
+		phydev->interface = PHY_INTERFACE_MODE_25GBASER;
 	} else {
 		phydev->speed = SPEED_UNKNOWN;
 		phydev->duplex = DUPLEX_UNKNOWN;
+		phydev->interface = PHY_INTERFACE_MODE_NA;
 	}
 
 	return 0;
@@ -356,6 +371,13 @@ static int adrv906x_phy_config_aneg(struct phy_device *phydev)
 	if (!adrv906x_phy_valid_speed(phydev->speed))
 		return -EINVAL;
 
+	linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_NONE_BIT, phydev->advertising);
+	if (phydev->speed == SPEED_25000 &&
+	    (phydev->dev_flags & ADRV906X_PHY_FLAGS_PCS_RS_FEC_EN))
+		linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->advertising);
+	else
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->advertising);
+
 	ret = adrv906x_phy_config_pcs_baser_mode(phydev);
 	if (ret)
 		return ret;
@@ -371,11 +393,19 @@ static int adrv906x_phy_config_aneg(struct phy_device *phydev)
 
 static int adrv906x_phy_aneg_done(struct phy_device *phydev)
 {
+	bool link_up, pcs_locked;
 	int val;
 
+	/* Check link status */
 	val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_STAT1);
+	link_up = !!(val & MDIO_STAT1_LSTATUS);
 
-	return !!(val & MDIO_STAT1_LSTATUS);
+	/* Check PCS lock */
+	phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2); /* Dummy read */
+	val = phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2);
+	pcs_locked = !!(val & ADRV906X_PCS_BRMGBT_STAT2_LBLKLK);
+
+	return link_up && pcs_locked;
 }
 
 static int adrv906x_phy_config_init(struct phy_device *phydev)
@@ -383,6 +413,18 @@ static int adrv906x_phy_config_init(struct phy_device *phydev)
 	phydev->autoneg = AUTONEG_DISABLE;
 	phydev->duplex = DUPLEX_FULL;
 	phydev->port = PORT_FIBRE;
+
+	if (phydev->speed == SPEED_25000)
+		phydev->interface = PHY_INTERFACE_MODE_25GBASER;
+	else if (phydev->speed == SPEED_10000)
+		phydev->interface = PHY_INTERFACE_MODE_10GBASER;
+
+	linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_NONE_BIT, phydev->advertising);
+	if (phydev->speed == SPEED_25000 &&
+	    (phydev->dev_flags & ADRV906X_PHY_FLAGS_PCS_RS_FEC_EN))
+		linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->advertising);
+	else
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->advertising);
 
 	return 0;
 }

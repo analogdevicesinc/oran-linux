@@ -413,11 +413,21 @@ static struct adrv906x_pll adrv906x_pll_dev[ADRV906X_PHY_MAX_PLLS] = {
 
 static struct adrv906x_serdes *adrv906x_serdes_instance_get(int dev_id)
 {
+	if (dev_id < 0 || dev_id >= ADRV906X_PHY_MAX_LANES) {
+		pr_err("serdes device id %d out of range", dev_id);
+		return NULL;
+	}
+
 	return &adrv906x_serdes_devs[dev_id];
 }
 
 static struct adrv906x_pll *adrv906x_pll_instance_get(int dev_id)
 {
+	if (dev_id < 0 || dev_id >= ADRV906X_PHY_MAX_PLLS) {
+		pr_err("pll device id %d out of range", dev_id);
+		return NULL;
+	}
+
 	return &adrv906x_pll_dev[dev_id];
 }
 
@@ -759,6 +769,9 @@ static int __sd_ser_cfg_done_recv(struct sk_buff *skb, struct genl_info *info)
 		return -EINVAL;
 
 	serdes = adrv906x_serdes_instance_get(dev_id);
+	if (!serdes)
+		return -EINVAL;
+
 	phydev = serdes->phydev;
 	netdev = phydev->attached_dev;
 
@@ -788,6 +801,9 @@ static int __sd_deser_cfg_done_recv(struct sk_buff *skb, struct genl_info *info)
 		return -EINVAL;
 
 	serdes = adrv906x_serdes_instance_get(dev_id);
+	if (!serdes)
+		return -EINVAL;
+
 	adrv906x_phy_fsm_trigger_transition(&serdes->fsm, SD_EVT_DESER_RDY);
 
 	return 0;
@@ -813,6 +829,9 @@ static int __sd_deser_signal_ok_recv(struct sk_buff *skb, struct genl_info *info
 		return -EINVAL;
 
 	serdes = adrv906x_serdes_instance_get(dev_id);
+	if (!serdes)
+		return -EINVAL;
+
 	phydev = serdes->phydev;
 
 	/* Reset PCS RX/TX data path */
@@ -845,6 +864,9 @@ static int __sd_app_pwr_down_rdy_recv(struct sk_buff *skb, struct genl_info *inf
 		return -EINVAL;
 
 	serdes = adrv906x_serdes_instance_get(dev_id);
+	if (!serdes)
+		return -EINVAL;
+
 	adrv906x_phy_fsm_trigger_transition(&serdes->fsm, SD_EVT_PWR_DOWN_DONE);
 
 	return 0;
@@ -870,6 +892,9 @@ static int __sd_deser_los_detected_recv(struct sk_buff *skb, struct genl_info *i
 		return -EINVAL;
 
 	serdes = adrv906x_serdes_instance_get(dev_id);
+	if (!serdes)
+		return -EINVAL;
+
 	phydev = serdes->phydev;
 	serdes->rx_path_en(phydev, false);
 	phy_trigger_machine(phydev);
@@ -1027,6 +1052,9 @@ static bool adrv906x_serdes_disabled(int dev_id)
 {
 	struct adrv906x_serdes *serdes = adrv906x_serdes_instance_get(dev_id);
 
+	if (!serdes)
+		return true;
+
 	switch (atomic_read(&serdes->fsm.state)) {
 	case SD_ST_SER_CFG:
 	case SD_ST_DESER_CFG:
@@ -1049,6 +1077,9 @@ static void __pll_unlkd_notif_lnk01(void *param)
 	serdes0 = adrv906x_serdes_instance_get(2 * pll->dev_id);
 	serdes1 = adrv906x_serdes_instance_get(2 * pll->dev_id + 1);
 
+	if (!serdes0 || !serdes1)
+		return;
+
 	adrv906x_phy_fsm_trigger_transition(&serdes0->fsm, SD_EVT_PLL_UNLOCKED);
 	adrv906x_phy_fsm_trigger_transition(&serdes1->fsm, SD_EVT_PLL_UNLOCKED);
 }
@@ -1060,6 +1091,8 @@ static void __pll_lkd_notif_lnk0(void *param)
 	struct adrv906x_serdes *serdes;
 
 	serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
+	if (!serdes)
+		return;
 
 	adrv906x_phy_fsm_trigger_transition(&serdes->fsm, SD_EVT_PLL_LOCKED);
 }
@@ -1071,6 +1104,8 @@ static void __pll_lkd_notif_lnk1(void *param)
 	struct adrv906x_serdes *serdes;
 
 	serdes = adrv906x_serdes_instance_get(2 * pll->dev_id + 1);
+	if (!serdes)
+		return;
 
 	adrv906x_phy_fsm_trigger_transition(&serdes->fsm, SD_EVT_PLL_LOCKED);
 }
@@ -1108,10 +1143,15 @@ static void __pll_cfg_10G_send(void *param)
 	struct net_device *netdev;
 	int ret;
 
-	if (adrv906x_serdes_instance_get(2 * pll->dev_id))
-		serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
-	else
+	/* Try to get the first serdes instance, fallback to second if NULL */
+	serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
+	if (!serdes)
 		serdes = adrv906x_serdes_instance_get(2 * pll->dev_id + 1);
+
+	if (!serdes) {
+		adrv906x_phy_fsm_trigger_transition(fsm, PLL_EVT_APP_INACT);
+		return;
+	}
 
 	phydev = serdes->phydev;
 	netdev = phydev->attached_dev;
@@ -1132,10 +1172,15 @@ static void __pll_cfg_25G_send(void *param)
 	struct net_device *netdev;
 	int ret;
 
-	if (adrv906x_serdes_instance_get(2 * pll->dev_id))
-		serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
-	else
+	/* Try to get the first serdes instance, fallback to second if NULL */
+	serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
+	if (!serdes)
 		serdes = adrv906x_serdes_instance_get(2 * pll->dev_id + 1);
+
+	if (!serdes) {
+		adrv906x_phy_fsm_trigger_transition(fsm, PLL_EVT_APP_INACT);
+		return;
+	}
 
 	phydev = serdes->phydev;
 	netdev = phydev->attached_dev;
@@ -1166,6 +1211,7 @@ static int adrv906x_pll_open(int dev_id)
 					    &pll->fsm, "pll%d-fsm", dev_id);
 		if (IS_ERR(pll->fsm.task)) {
 			pr_err("kthread_run() failed");
+			kfifo_free(&pll->fsm.event_fifo);
 			mutex_unlock(&pll->mtx);
 			return PTR_ERR(pll->fsm.task);
 		}
@@ -1200,8 +1246,13 @@ int adrv906x_serdes_open(struct phy_device *phydev,
 			 adrv906x_serdes_cb tx_cb, adrv906x_serdes_cb rx_cb)
 {
 	struct adrv906x_serdes *serdes;
-	int dev_id = phydev->mdio.addr;
+	int dev_id;
 	int ret;
+
+	if (!phydev)
+		return -EINVAL;
+
+	dev_id = phydev->mdio.addr;
 
 	serdes = adrv906x_serdes_instance_get(dev_id);
 	if (!serdes)
@@ -1225,6 +1276,7 @@ int adrv906x_serdes_open(struct phy_device *phydev,
 				       &serdes->fsm, "serdes%d-fsm", dev_id);
 	if (IS_ERR(serdes->fsm.task)) {
 		pr_err("kthread_run() failed");
+		kfifo_free(&serdes->fsm.event_fifo);
 		return PTR_ERR(serdes->fsm.task);
 	}
 	snprintf(serdes->fsm.name, sizeof(serdes->fsm.name), "serdes%d-fsm", dev_id);

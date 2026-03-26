@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/phy.h>
+#include <linux/phylink.h>
 #include <linux/of_net.h>
 #include <linux/of_mdio.h>
 #include <linux/if_vlan.h>
@@ -129,82 +130,110 @@ static ssize_t recovered_clock_output_store(struct device *dev,
 
 static DEVICE_ATTR_RW(recovered_clock_output);
 
-static void adrv906x_eth_adjust_link(struct net_device *ndev)
+static void adrv906x_net_config(struct phylink_config *config, unsigned int mode,
+				const struct phylink_link_state *state)
 {
+}
+
+static void adrv906x_net_link_down(struct phylink_config *config, unsigned int mode,
+				   phy_interface_t interface)
+{
+	struct net_device *ndev = to_net_dev(config->dev);
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
+	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
+	struct adrv906x_mac *mac = &adrv906x_dev->mac;
+
+	netif_stop_queue(ndev);
+	adrv906x_mac_set_path(mac, false);
+
+	if (eth_if->ethswitch.enabled)
+		adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
+}
+
+static void adrv906x_net_link_up(struct phylink_config *config,
+				 struct phy_device *phy,
+				 unsigned int mode, phy_interface_t interface,
+				 int speed, int duplex,
+				 bool tx_pause, bool rx_pause)
+{
+	struct net_device *ndev = to_net_dev(config->dev);
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
 	struct adrv906x_mac *mac = &adrv906x_dev->mac;
 	struct adrv906x_tsu *tsu = &adrv906x_dev->tsu;
-	struct phy_device *phydev = ndev->phydev;
-	unsigned long flags;
 	u32 val;
 
-	if (adrv906x_dev->link == phydev->link)
+	/* Check MAC link stability and reset PCS if needed */
+	if (!adrv906x_mac_link_stable(mac) && phy) {
+		adrv906x_phy_pcs_reset_rx(phy);
+		adrv906x_dev->intf_recovery_resets++;
 		return;
-
-	spin_lock_irqsave(&adrv906x_dev->lock, flags);
-	adrv906x_dev->link = phydev->link;
-	spin_unlock_irqrestore(&adrv906x_dev->lock, flags);
-
-	if (adrv906x_dev->link) {
-		if (!adrv906x_mac_link_stable(mac)) {
-			adrv906x_phy_pcs_reset_rx(phydev);
-			adrv906x_dev->intf_recovery_resets++;
-			return;
-		}
-
-		adrv906x_tsu_set_speed(tsu, phydev->speed);
-		adrv906x_eth_cmn_recovered_clk_config(adrv906x_dev);
-		adrv906x_mac_set_path(mac, true);
-
-		if (eth_if->ethswitch.enabled) {
-			val = phydev->speed == SPEED_10000 ? AGE_TIME_5MIN_10G : AGE_TIME_5MIN_25G;
-			adrv906x_switch_set_mae_age_time(es, val);
-			adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
-			/* Trigger recovery to restore VLAN and FDB configuration after link up */
-			atomic_set(&es->error_pending, 1);
-			wake_up_interruptible(&es->recovery_wq);
-		}
-		netif_wake_queue(ndev);
-	} else {
-		netif_stop_queue(ndev);
-		if (eth_if->ethswitch.enabled)
-			adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
 	}
 
-	phy_print_status(phydev);
+	adrv906x_tsu_set_speed(tsu, speed);
+	adrv906x_eth_cmn_recovered_clk_config(adrv906x_dev);
+	adrv906x_mac_set_path(mac, true);
+
+	if (eth_if->ethswitch.enabled) {
+		val = speed == SPEED_10000 ? AGE_TIME_5MIN_10G : AGE_TIME_5MIN_25G;
+		adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
+		/* Trigger recovery to restore VLAN and FDB configuration after link up */
+		atomic_set(&es->error_pending, 1);
+		wake_up_interruptible(&es->recovery_wq);
+		adrv906x_switch_set_mae_age_time(es, val);
+	}
+
+	netif_wake_queue(ndev);
 }
 
-static int adrv906x_eth_phy_connect(struct net_device *ndev, struct device_node *port_np)
+static const struct phylink_mac_ops adrv906x_net_ops = {
+	.mac_config = adrv906x_net_config,
+	.mac_link_down = adrv906x_net_link_down,
+	.mac_link_up = adrv906x_net_link_up,
+};
+
+static int adrv906x_eth_phylink_init(struct net_device *ndev, struct device_node *port_np)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct device *dev = adrv906x_dev->dev;
-	struct device_node *phynode;
-	struct phy_device *phydev;
-	struct device *mdiodev;
+	struct phylink *phylink;
+	int ret;
 
-	phynode = of_parse_phandle(port_np, "phy-handle", 0);
-	if (!phynode) {
-		dev_err(dev, "dt: failed to retrieve phy phandle");
-		return -ENODEV;
+	/* Configure phylink_config */
+	adrv906x_dev->phylink_config.dev = &ndev->dev;
+	adrv906x_dev->phylink_config.type = PHYLINK_NETDEV;
+
+	/* Set MAC capabilities for 10G/25G fiber-based interfaces */
+	adrv906x_dev->phylink_config.mac_capabilities =
+		MAC_10000FD | MAC_25000FD;
+
+	/* Set supported interfaces - PHY handles 10GBASE-R and 25GBASE-R PCS */
+	__set_bit(PHY_INTERFACE_MODE_10GBASER,
+		  adrv906x_dev->phylink_config.supported_interfaces);
+	__set_bit(PHY_INTERFACE_MODE_25GBASER,
+		  adrv906x_dev->phylink_config.supported_interfaces);
+
+	/* Create phylink instance */
+	phylink = phylink_create(&adrv906x_dev->phylink_config,
+				 of_fwnode_handle(port_np),
+				 PHY_INTERFACE_MODE_NA,
+				 &adrv906x_net_ops);
+	if (IS_ERR(phylink)) {
+		dev_err(dev, "failed to create phylink");
+		return PTR_ERR(phylink);
 	}
 
-	phydev = of_phy_connect(ndev, phynode, &adrv906x_eth_adjust_link, 0, PHY_INTERFACE_MODE_NA);
-	if (!phydev) {
-		netdev_err(ndev, "could not connect to PHY");
-		return -ENODEV;
-	}
+	adrv906x_dev->phylink = phylink;
 
-	/* When the of_phy_connect() function attaches the phydev to the netdev based on the
-	 * device tree node, it increases the reference count of the PHY module to prevent it
-	 * from being removed prematurely. For ADRV906x, the PHY and Ethernet drivers are built
-	 * into the same module and, thus, the resulting reference count of the adrv906x_eth
-	 * module is incorrectly increased, which prevents the module from being removed later.
-	 * put_module() decreases the module's reference count.
-	 */
-	mdiodev = &phydev->mdio.dev;
-	module_put(mdiodev->driver->owner);
+	/* Connect PHY through phylink - PHY reports PCS status via read_status() */
+	ret = phylink_of_phy_connect(phylink, port_np, 0);
+	if (ret) {
+		dev_err(dev, "could not connect to phy via phylink");
+		phylink_destroy(phylink);
+		return ret;
+	}
 
 	return 0;
 }
@@ -249,7 +278,7 @@ static void adrv906x_eth_tx_callback(struct sk_buff *skb, unsigned int port_id,
 		adrv906x_dev->tx_frames_pending--;
 
 	if (adrv906x_dev->tx_frames_pending < adrv906x_eth->tx_max_frames_pending &&
-	    adrv906x_dev->link)
+	    netif_carrier_ok(ndev))
 		wake_needed = true;
 	spin_unlock_irqrestore(&adrv906x_dev->lock, flags);
 
@@ -617,10 +646,7 @@ static int adrv906x_eth_open(struct net_device *ndev)
 	struct adrv906x_ndma_dev *ndma_dev = adrv906x_dev->ndma_dev;
 
 	adrv906x_eth_oran_if_en(&adrv906x_dev->oif);
-
-	if (ndev->phydev)
-		phy_start(ndev->phydev);
-
+	phylink_start(adrv906x_dev->phylink);
 	adrv906x_ndma_open(ndma_dev, adrv906x_eth_tx_callback, adrv906x_eth_rx_callback,
 			   ndev, adrv906x_eth_flood_callback);
 
@@ -642,8 +668,8 @@ static int adrv906x_eth_stop(struct net_device *ndev)
 
 	netif_stop_queue(ndev);
 	adrv906x_ndma_close(ndma_dev, ndev);
-	if (ndev->phydev)
-		phy_stop(ndev->phydev);
+	phylink_stop(adrv906x_dev->phylink);
+
 	return 0;
 }
 
@@ -1087,7 +1113,7 @@ no_macsec:
 
 		__set_default_multicast_filters(adrv906x_dev);
 
-		ret = adrv906x_eth_phy_connect(ndev, port_np);
+		ret = adrv906x_eth_phylink_init(ndev, port_np);
 		if (ret)
 			goto error_unregister_netdev;
 
@@ -1136,9 +1162,20 @@ error_delete_groups:
 	if (eth_if->ethswitch.enabled)
 		adrv906x_switch_unregister_attr(&eth_if->ethswitch);
 error_unregister_netdev:
-	for (i = 0; i < MAX_NETDEV_NUM; i++)
-		if (eth_if->adrv906x_dev[i] && eth_if->adrv906x_dev[i]->ndev)
-			unregister_netdev(eth_if->adrv906x_dev[i]->ndev);
+	for (i = 0; i < MAX_NETDEV_NUM; i++) {
+		if (eth_if->adrv906x_dev[i]) {
+			/* Unregister netdev first (may call ndo_stop -> phylink_stop) */
+			if (eth_if->adrv906x_dev[i]->ndev)
+				unregister_netdev(eth_if->adrv906x_dev[i]->ndev);
+			/* Then clean up phylink */
+			if (eth_if->adrv906x_dev[i]->phylink) {
+				if (eth_if->adrv906x_dev[i]->ndev->phydev)
+					phylink_disconnect_phy(eth_if->adrv906x_dev[i]->phylink);
+				phylink_destroy(eth_if->adrv906x_dev[i]->phylink);
+				eth_if->adrv906x_dev[i]->phylink = NULL;
+			}
+		}
+	}
 error:
 	return ret;
 }
@@ -1161,8 +1198,10 @@ static void adrv906x_eth_remove(struct platform_device *pdev)
 			device_remove_file(&eth_if->adrv906x_dev[i]->ndev->dev,
 					   &dev_attr_recovered_clock_output);
 			dev_set_drvdata(&eth_if->adrv906x_dev[i]->ndev->dev, NULL);
-			phy_disconnect(ndev->phydev);
+			phylink_disconnect_phy(eth_if->adrv906x_dev[i]->phylink);
 			unregister_netdev(ndev);
+			phylink_destroy(eth_if->adrv906x_dev[i]->phylink);
+			eth_if->adrv906x_dev[i]->phylink = NULL;
 #if IS_ENABLED(CONFIG_MACSEC)
 			adrv906x_macsec_remove(ndev);
 #endif /* IS_ENABLED(CONFIG_MACSEC) */

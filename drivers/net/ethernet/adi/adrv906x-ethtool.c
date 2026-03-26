@@ -11,6 +11,7 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/phy.h>
+#include <linux/phylink.h>
 #include <linux/ethtool.h>
 #include <linux/bitrev.h>
 #include <linux/completion.h>
@@ -252,42 +253,44 @@ static u8 adrv906x_packet_next_id;
 static int adrv906x_ethtool_set_link_ksettings(struct net_device *ndev,
 					       const struct ethtool_link_ksettings *cmd)
 {
-	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
+	struct phy_device *phydev = ndev->phydev;
 	u8 autoneg = cmd->base.autoneg;
 	u8 duplex = cmd->base.duplex;
 	u32 speed = cmd->base.speed;
-	struct phy_device *phydev = ndev->phydev;
 
 	if (!phydev)
 		return -ENODEV;
 
-	if (cmd->base.phy_address != phydev->mdio.addr)
+	/* This PHY only supports:
+	 * - Speeds: 10G or 25G
+	 * - Autoneg: Disabled
+	 * - Duplex: Full
+	 */
+	if (autoneg != AUTONEG_DISABLE)
 		return -EINVAL;
 
-	linkmode_copy(advertising, cmd->link_modes.advertising);
-
-	/* Filter out unsupported link modes */
-	linkmode_and(advertising, advertising, phydev->supported);
-
-	/* Reject autonegotiation */
-	if (autoneg == AUTONEG_ENABLE)
+	if (speed != SPEED_10000 && speed != SPEED_25000)
 		return -EINVAL;
 
-	if ((speed != SPEED_10000 && speed != SPEED_25000) || duplex != DUPLEX_FULL)
+	if (duplex != DUPLEX_FULL)
 		return -EINVAL;
 
+	/* Configure the PHY directly for fixed speed operation */
 	mutex_lock(&phydev->lock);
-	phydev->autoneg = autoneg;
+	phydev->autoneg = AUTONEG_DISABLE;
 	phydev->speed = speed;
-	phydev->duplex = duplex;
+	phydev->duplex = DUPLEX_FULL;
 
-	linkmode_copy(phydev->advertising, advertising);
-	linkmode_mod_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
-			 phydev->advertising, autoneg == AUTONEG_ENABLE);
+	/* Update interface mode based on speed */
+	if (speed == SPEED_25000)
+		phydev->interface = PHY_INTERFACE_MODE_25GBASER;
+	else if (speed == SPEED_10000)
+		phydev->interface = PHY_INTERFACE_MODE_10GBASER;
 
+	/* If PHY is running, trigger reconfiguration */
 	if (phy_is_started(phydev)) {
 		phydev->state = PHY_UP;
-		phy_start_machine(phydev);
+		phy_trigger_machine(phydev);
 	}
 	mutex_unlock(&phydev->lock);
 
@@ -520,13 +523,17 @@ static int adrv906x_ethtool_get_fecparam(struct net_device *ndev,
 {
 	struct phy_device *phydev = ndev->phydev;
 
-	fecparam->fec = ETHTOOL_FEC_RS;
-
 	mutex_lock(&phydev->lock);
-	if (phydev->speed == SPEED_25000 && phydev->dev_flags & ADRV906X_PHY_FLAGS_PCS_RS_FEC_EN)
-		fecparam->active_fec = ETHTOOL_FEC_RS;
-	else
+	if (phydev->speed == SPEED_25000) {
+		fecparam->fec = ETHTOOL_FEC_OFF | ETHTOOL_FEC_RS;
+		if (phydev->dev_flags & ADRV906X_PHY_FLAGS_PCS_RS_FEC_EN)
+			fecparam->active_fec = ETHTOOL_FEC_RS;
+		else
+			fecparam->active_fec = ETHTOOL_FEC_OFF;
+	} else {
 		fecparam->active_fec = ETHTOOL_FEC_OFF;
+		fecparam->fec = ETHTOOL_FEC_OFF;
+	}
 	mutex_unlock(&phydev->lock);
 
 	return 0;
