@@ -29,7 +29,7 @@ struct cco_macsec_priv *cco_macsec_get_priv(struct net_device *netdev)
 	return &macsec->priv;
 }
 
-static void *cco_macsec_get_base(struct net_device *netdev)
+static void __iomem *cco_macsec_get_base(struct net_device *netdev)
 {
 	struct adrv906x_macsec_priv *macsec = adrv906x_macsec_get(netdev);
 
@@ -38,14 +38,14 @@ static void *cco_macsec_get_base(struct net_device *netdev)
 
 void cco_macsec_reg_wr(struct net_device *netdev, unsigned long addr, u32 value)
 {
-	void __iomem *reg_ptr = (void __iomem *)cco_macsec_get_base(netdev);
+	void __iomem *reg_ptr = cco_macsec_get_base(netdev);
 
 	iowrite32(value, reg_ptr + addr);
 }
 
 u32  cco_macsec_reg_rd(struct net_device *netdev, unsigned long addr)
 {
-	void __iomem *reg_ptr = (void __iomem *)cco_macsec_get_base(netdev);
+	void __iomem *reg_ptr = cco_macsec_get_base(netdev);
 
 	return ioread32(reg_ptr + addr);
 }

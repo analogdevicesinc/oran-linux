@@ -16,7 +16,7 @@
 struct adrv906x_macsec_priv {
 	struct device *dev;
 	struct cco_macsec_priv priv;
-	void *base;
+	void __iomem *base;
 	int irq;
 };
 
