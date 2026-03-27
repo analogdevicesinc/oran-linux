@@ -283,7 +283,8 @@ static int adrv906x_eth_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	if (stop_needed && netif_carrier_ok(ndev))
 		netif_stop_queue(ndev);
 
-	hw_tstamp_req = (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) ? 1 : 0;
+	hw_tstamp_req = (adrv906x_dev->tstamp_config.tx_type == HWTSTAMP_TX_ON &&
+			 (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)) ? 1 : 0;
 	if (hw_tstamp_req)
 		skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 	skb_tx_timestamp(skb);
@@ -448,15 +449,7 @@ static int adrv906x_set_hwtstamp_config(struct net_device *ndev, struct ifreq *i
 
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_OFF:
-		/* Timestamp flag is checked per-packet via SKBTX_HW_TSTAMP,
-		 * no global configuration needed
-		 */
-		break;
-
 	case HWTSTAMP_TX_ON:
-		/* Timestamp flag is checked per-packet via SKBTX_HW_TSTAMP,
-		 * no global configuration needed
-		 */
 		break;
 
 	default:
