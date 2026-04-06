@@ -20,7 +20,7 @@
 #include "adrv906x-switch.h"
 #include "adrv906x-cmn.h"
 
-static struct attribute *adrv906x_switch_attrs[4] = { NULL, NULL, NULL, NULL };
+static struct attribute *adrv906x_switch_attrs[5] = { NULL, NULL, NULL, NULL, NULL };
 
 static int adrv906x_switch_wait_for_mae_ready(struct adrv906x_eth_switch *es)
 {
@@ -211,11 +211,6 @@ static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u1
 		return -EINVAL;
 
 	mutex_lock(&es->lock);
-	if (pvid == es->switch_port[port].pvid) {
-		mutex_unlock(&es->lock);
-		return 0;
-	}
-
 	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
 		if (es->switch_port[i].pvid == pvid)
 			pvid_used_by_another_front_port = true;
@@ -252,25 +247,56 @@ static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u1
 	 * Note: The new PVID is already programmed in hardware at this point, so we must
 	 * update software state regardless of whether old PVID clean-up succeeds.
 	 */
-	pvid_used_by_another_front_port = false;
-	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
-		if (i != port && es->switch_port[i].pvid == old_pvid)
-			pvid_used_by_another_front_port = true;
+	if (old_pvid != pvid) {
+		pvid_used_by_another_front_port = false;
+		for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
+			if (i != port && es->switch_port[i].pvid == old_pvid)
+				pvid_used_by_another_front_port = true;
+		}
+		if (!pvid_used_by_another_front_port) {
+			ret = adrv906x_switch_vlan_match_action_sync(es, 0, old_pvid);
+			if (ret)
+				dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
+					 old_pvid);
+			es->vlan_port_mask[old_pvid] = 0;
+		} else {
+			port_mask = es->vlan_port_mask[old_pvid] & ~BIT(port);
+			ret = adrv906x_switch_vlan_match_action_sync(es, port_mask, old_pvid);
+			if (ret)
+				dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
+					 old_pvid);
+			es->vlan_port_mask[old_pvid] = port_mask;
+		}
 	}
-	if (!pvid_used_by_another_front_port) {
-		ret = adrv906x_switch_vlan_match_action_sync(es, 0, old_pvid);
-		if (ret)
-			dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
-				 old_pvid);
-		es->vlan_port_mask[old_pvid] = 0;
-	} else {
-		port_mask = es->vlan_port_mask[old_pvid] & ~BIT(port);
-		ret = adrv906x_switch_vlan_match_action_sync(es, port_mask, old_pvid);
-		if (ret)
-			dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
-				 old_pvid);
-		es->vlan_port_mask[old_pvid] = port_mask;
+	mutex_unlock(&es->lock);
+
+	return 0;
+}
+
+static int adrv906x_switch_mode_set(struct adrv906x_eth_switch *es, u16 port, u8 mode)
+{
+	u32 val;
+
+	if (port >= SWITCH_MAX_PORT_NUM)
+		return -EINVAL;
+
+	/* Validate mode value */
+	if (mode != SWITCH_PORT_VLAN_MODE_ACCESS &&
+	    mode != SWITCH_PORT_VLAN_MODE_TRUNK &&
+	    mode != SWITCH_PORT_VLAN_MODE_ACCEPT_ALL)
+		return -EINVAL;
+
+	mutex_lock(&es->lock);
+	if (mode == es->switch_port[port].vlan_mode) {
+		mutex_unlock(&es->lock);
+		return 0;
 	}
+
+	val = ioread32(es->switch_port[port].reg + SWITCH_PORT_CFG_VLAN);
+	val &= ~SWITCH_PORT_VLAN_MODE_MASK;
+	val |= FIELD_PREP(SWITCH_PORT_VLAN_MODE_MASK, mode);
+	iowrite32(val, es->switch_port[port].reg + SWITCH_PORT_CFG_VLAN);
+	es->switch_port[port].vlan_mode = mode;
 	mutex_unlock(&es->lock);
 
 	return 0;
@@ -552,6 +578,101 @@ static ssize_t port_vlan_ctrl_show(struct device *dev,
 		char_cnt += sprintf(buf + char_cnt, "\n");
 	}
 	mutex_unlock(&es->lock);
+
+	return char_cnt;
+}
+
+static ssize_t port_vlan_mode_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t cnt)
+{
+	struct adrv906x_eth_switch *es =
+		container_of(attr, struct adrv906x_eth_switch, port_vlan_mode_attr);
+	char cmdstr[32];
+	char *token, *cmdstr_ptr;
+	u16 port;
+	u8 mode;
+	int ret;
+
+	if (cnt < 6 || cnt > 31)
+		return -EINVAL;
+
+	memcpy(cmdstr, buf, cnt);
+	cmdstr[cnt] = '\0';
+	cmdstr_ptr = cmdstr;
+
+	/* Parse "mode" keyword */
+	token = strsep(&cmdstr_ptr, " ");
+	if (!token || strncmp(token, "mode", 4))
+		return -EINVAL;
+
+	/* Parse mode value */
+	token = strsep(&cmdstr_ptr, " ");
+	if (!token)
+		return -EINVAL;
+	ret = kstrtou8(token, 10, &mode);
+	if (ret)
+		return ret;
+
+	/* Validate mode value */
+	if (mode != SWITCH_PORT_VLAN_MODE_ACCESS &&
+	    mode != SWITCH_PORT_VLAN_MODE_TRUNK &&
+	    mode != SWITCH_PORT_VLAN_MODE_ACCEPT_ALL)
+		return -EINVAL;
+
+	/* Parse port number */
+	token = strsep(&cmdstr_ptr, "\n");
+	if (!token)
+		return -EINVAL;
+	ret = kstrtou16(token, 10, &port);
+	if (ret)
+		return ret;
+
+	if (port >= SWITCH_MAX_PORT_NUM)
+		return -EINVAL;
+
+	ret = adrv906x_switch_mode_set(es, port, mode);
+	if (ret)
+		return ret;
+
+	return cnt;
+}
+
+static ssize_t port_vlan_mode_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct adrv906x_eth_switch *es =
+		container_of(attr, struct adrv906x_eth_switch, port_vlan_mode_attr);
+	const char *mode_str;
+	void __iomem *io;
+	int char_cnt = 0;
+	u32 mode, reg;
+	int i;
+
+	char_cnt = sprintf(buf + char_cnt, "%-8s%-12s%-8s\n", "port", "mode", "value");
+
+	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
+		io = es->switch_port[i].reg;
+		reg = ioread32(io + SWITCH_PORT_CFG_VLAN);
+		mode = FIELD_GET(SWITCH_PORT_VLAN_MODE_MASK, reg);
+
+		switch (mode) {
+		case SWITCH_PORT_VLAN_MODE_ACCESS:
+			mode_str = "access";
+			break;
+		case SWITCH_PORT_VLAN_MODE_TRUNK:
+			mode_str = "trunk";
+			break;
+		case SWITCH_PORT_VLAN_MODE_ACCEPT_ALL:
+			mode_str = "accept all";
+			break;
+		default:
+			mode_str = "unknown";
+			break;
+		}
+
+		char_cnt += sprintf(buf + char_cnt, "%-8d%-12s%-8d\n", i, mode_str, mode);
+	}
 
 	return char_cnt;
 }
@@ -840,7 +961,12 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 
 		/* Initialize to hardware default PVID after reset but exempt the CPU port */
 		es->switch_port[i].pvid = SWITCH_PVID;
+		/* Initialize to hybrid mode */
+		es->switch_port[i].vlan_mode = SWITCH_PORT_VLAN_MODE_ACCEPT_ALL;
+		/* no vlan tag processing on CPU port */
 		if (i != SWITCH_CPU_PORT) {
+			u16 mode_val;
+
 			ret = of_property_read_u16(switch_port_np, "pvid", &pvid);
 			if (ret < 0)
 				pvid = SWITCH_PVID;
@@ -852,8 +978,27 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 			ret = adrv906x_switch_pvid_set(es, i, pvid);
 			if (ret) {
 				of_node_put(switch_port_np);
-                dev_err(dev, "failed setting pvid %u for port %u", pvid, i);
+				dev_err(dev, "failed setting pvid %u for port %u", pvid, i);
 				return ret;
+			}
+
+			ret = of_property_read_u16(switch_port_np, "mode", &mode_val);
+			if (ret == 0) {
+				u8 mode = (u8)mode_val;
+
+				if (mode != SWITCH_PORT_VLAN_MODE_ACCESS &&
+				    mode != SWITCH_PORT_VLAN_MODE_TRUNK &&
+				    mode != SWITCH_PORT_VLAN_MODE_ACCEPT_ALL) {
+					dev_warn(dev, "invalid mode %u from DT for port %u, using default hybrid mode",
+						 mode, i);
+					mode = SWITCH_PORT_VLAN_MODE_ACCEPT_ALL;
+				}
+				ret = adrv906x_switch_mode_set(es, i, mode);
+				if (ret) {
+					of_node_put(switch_port_np);
+					dev_err(dev, "failed setting mode %u for port %u", mode, i);
+					return ret;
+				}
 			}
 		}
 		i++;
@@ -1013,6 +1158,8 @@ int adrv906x_switch_init(struct adrv906x_eth_switch *es)
 
 	__SWITCH_ATTR_RW(port_vlan_ctrl);
 	adrv906x_switch_attrs[0] = &es->port_vlan_ctrl_attr.attr;
+	__SWITCH_ATTR_RW(port_vlan_mode);
+	adrv906x_switch_attrs[1] = &es->port_vlan_mode_attr.attr;
 	es->attr_group.attrs = adrv906x_switch_attrs;
 	if (es->vlan_enabled) {
 		ret = sysfs_create_group(&es->pdev->dev.kobj, &es->attr_group);

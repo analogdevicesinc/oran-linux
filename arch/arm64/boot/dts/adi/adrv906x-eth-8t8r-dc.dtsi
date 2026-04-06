@@ -26,15 +26,18 @@
 			id = <0>;
 			reg = <SEC_EMAC_SW_PORT_0_BASE 0x400>;
 			pvid = /bits/ 16 <1>;
+			mode = /bits/ 16 <3>;
 		};
 		switch_port4:switch-port@4 {
 			id = <1>;
 			reg = <SEC_EMAC_SW_PORT_1_BASE 0x400>;
 			pvid = /bits/ 16 <1>;
+			mode = /bits/ 16 <3>;
 		};
 		switch_port5:switch-port@5 {
 			id = <2>;
 			reg = <SEC_EMAC_SW_PORT_2_BASE 0x400>;
+			mode = /bits/ 16 <3>;
 		};
 	};
 };

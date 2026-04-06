@@ -271,6 +271,9 @@ patternProperties:
           pvid:
             $ref: /schemas/types.yaml#/definitions/uint16
             description: (optional) Default primary VLAN IDs (1–4094) for the fronthaul switch port.
+          mode:
+            $ref: /schemas/types.yaml#/definitions/uint16
+            description: VLAN mode (Acceptable frame type) - access(0), trunk(1), accept all(3)
         additionalProperties: false
     additionalProperties: false
 
@@ -413,15 +416,18 @@ examples:
           id = <0>;
           reg = <EMAC_SW_PORT_0_BASE 0x400>;
           pvid = /bits/ 16 <1>;
+          mode = /bits/ 16 <3>;
         };
         switch_port1:switch-port@1 {
           id = <1>;
           reg = <EMAC_SW_PORT_1_BASE 0x400>;
           pvid = /bits/ 16 <1>;
+          mode = /bits/ 16 <3>;
         };
         switch_port2:switch-port@2 {
           id = <2>;
           reg = <EMAC_SW_PORT_2_BASE 0x400>;
+          mode = /bits/ 16 <3>;
         };
       };
     };

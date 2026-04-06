@@ -27,6 +27,10 @@
 #define SWITCH_PORT_CFG_VLAN                            0x0008
 #define   SWITCH_PORT_PVID_MASK                         GENMASK(11, 0)
 #define   SWITCH_PORT_VLAN_EN_MASK                      BIT(12)
+#define   SWITCH_PORT_VLAN_MODE_MASK                    GENMASK(17, 16)
+#define   SWITCH_PORT_VLAN_MODE_ACCESS                  0
+#define   SWITCH_PORT_VLAN_MODE_TRUNK                   1
+#define   SWITCH_PORT_VLAN_MODE_ACCEPT_ALL              3
 #define SWITCH_PORT_CFG_QINQ                            0x000c
 #define   SWITCH_PORT_CFG_DSA_TX_EN                     BIT(17)
 #define   SWITCH_PORT_CFG_DSA_RX_EN                     BIT(16)
@@ -109,6 +113,7 @@ struct switch_port {
 	unsigned int config_mask;
 	void __iomem *reg;
 	u16 pvid;
+	u8 vlan_mode;
 };
 
 struct switch_pcp {
@@ -168,6 +173,7 @@ struct adrv906x_eth_switch {
 	u8 port_enabled_mask;
 	struct mutex lock;      /* protect data structures and hw access */
 	struct device_attribute port_vlan_ctrl_attr;
+	struct device_attribute port_vlan_mode_attr;
 	struct attribute_group attr_group;
 	void __iomem *reg_match_action;
 	void __iomem *reg_switch;
