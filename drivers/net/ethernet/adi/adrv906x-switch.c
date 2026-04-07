@@ -10,7 +10,6 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/if_vlan.h>
-#include <linux/ethtool.h>
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
@@ -199,10 +198,9 @@ int adrv906x_switch_vlan_del_cpuport(struct adrv906x_eth_switch *es, u16 vid)
 
 static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u16 pvid)
 {
-	bool pvid_used_by_another_front_port = false;
 	u32 port_mask;
 	u16 old_pvid;
-	int ret, i;
+	int ret;
 	u32 val;
 
 	if (port >= SWITCH_MAX_PORT_NUM - 1)
@@ -211,13 +209,14 @@ static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u1
 		return -EINVAL;
 
 	mutex_lock(&es->lock);
-	for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
-		if (es->switch_port[i].pvid == pvid)
-			pvid_used_by_another_front_port = true;
-	}
 
-	if (es->vlan_port_mask[pvid] && !pvid_used_by_another_front_port) {
-		dev_err(&es->pdev->dev, "cannot set pvid %u for port %u, vlan already in use",
+	/* Prevent setting PVID if this port is already a trunk member of this VLAN.
+	 * This avoids redundant/conflicting configuration on the same port.
+	 * Allow if: 1) Port not in VLAN yet, or 2) Port is in VLAN only because
+	 * it's already using this PVID (idempotent operation).
+	 */
+	if ((es->vlan_port_mask[pvid] & BIT(port)) && es->switch_port[port].pvid != pvid) {
+		dev_err(&es->pdev->dev, "cannot set pvid %u for port %u, port is already a trunk member of this vlan",
 			pvid, port);
 		mutex_unlock(&es->lock);
 		return -EINVAL;
@@ -242,31 +241,25 @@ static int adrv906x_switch_pvid_set(struct adrv906x_eth_switch *es, u16 port, u1
 	es->switch_port[port].pvid = pvid;
 
 	/* Remove the old PVID from VLAN membership table (best-effort clean-up).
-	 * If other ports still use the old PVID, just remove this port from the membership.
-	 * If no other port uses it, remove the VLAN entry entirely.
+	 * Always remove this port from the old PVID's membership. Other ports may
+	 * still be members (either as trunk members or using this PVID), so we
+	 * preserve their membership. Only remove the VLAN completely if no front
+	 * ports remain in it.
 	 * Note: The new PVID is already programmed in hardware at this point, so we must
 	 * update software state regardless of whether old PVID clean-up succeeds.
 	 */
 	if (old_pvid != pvid) {
-		pvid_used_by_another_front_port = false;
-		for (i = 0; i < SWITCH_MAX_PORT_NUM - 1; i++) {
-			if (i != port && es->switch_port[i].pvid == old_pvid)
-				pvid_used_by_another_front_port = true;
-		}
-		if (!pvid_used_by_another_front_port) {
-			ret = adrv906x_switch_vlan_match_action_sync(es, 0, old_pvid);
-			if (ret)
-				dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
-					 old_pvid);
-			es->vlan_port_mask[old_pvid] = 0;
-		} else {
-			port_mask = es->vlan_port_mask[old_pvid] & ~BIT(port);
-			ret = adrv906x_switch_vlan_match_action_sync(es, port_mask, old_pvid);
-			if (ret)
-				dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
-					 old_pvid);
-			es->vlan_port_mask[old_pvid] = port_mask;
-		}
+		port_mask = es->vlan_port_mask[old_pvid] & ~BIT(port);
+
+		/* If only CPU port remains (or no ports), remove the VLAN entirely */
+		if (!(port_mask & ~BIT(SWITCH_CPU_PORT)))
+			port_mask = 0;
+
+		ret = adrv906x_switch_vlan_match_action_sync(es, port_mask, old_pvid);
+		if (ret)
+			dev_warn(&es->pdev->dev, "failed to remove old pvid %u from hardware",
+				 old_pvid);
+		es->vlan_port_mask[old_pvid] = port_mask;
 	}
 	mutex_unlock(&es->lock);
 
@@ -905,6 +898,7 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 	struct device_node *eth_switch_np, *switch_port_np;
 	u16 default_vids[] = { 2, 3, 4, 5 };
 	u32 reg, len, portid;
+	u8 mode_val, mode;
 	int i = 0;
 	u16 pvid;
 	int ret;
@@ -965,8 +959,6 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 		es->switch_port[i].vlan_mode = SWITCH_PORT_VLAN_MODE_ACCEPT_ALL;
 		/* no vlan tag processing on CPU port */
 		if (i != SWITCH_CPU_PORT) {
-			u16 mode_val;
-
 			ret = of_property_read_u16(switch_port_np, "pvid", &pvid);
 			if (ret < 0)
 				pvid = SWITCH_PVID;
@@ -982,10 +974,9 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 				return ret;
 			}
 
-			ret = of_property_read_u16(switch_port_np, "mode", &mode_val);
+			ret = of_property_read_u8(switch_port_np, "mode", &mode_val);
 			if (ret == 0) {
-				u8 mode = (u8)mode_val;
-
+				mode = mode_val;
 				if (mode != SWITCH_PORT_VLAN_MODE_ACCESS &&
 				    mode != SWITCH_PORT_VLAN_MODE_TRUNK &&
 				    mode != SWITCH_PORT_VLAN_MODE_ACCEPT_ALL) {
