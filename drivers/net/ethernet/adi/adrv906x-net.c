@@ -648,7 +648,7 @@ static int adrv906x_eth_open(struct net_device *ndev)
 	adrv906x_eth_oran_if_en(&adrv906x_dev->oif);
 	phylink_start(adrv906x_dev->phylink);
 	adrv906x_ndma_open(ndma_dev, adrv906x_eth_tx_callback, adrv906x_eth_rx_callback,
-			   ndev, adrv906x_eth_flood_callback);
+			   ndev);
 
 #if IS_ENABLED(CONFIG_MACSEC)
 	if (adrv906x_dev->macsec)
@@ -1089,7 +1089,8 @@ no_macsec:
 			}
 
 			ret = adrv906x_ndma_probe(pdev, ndev, ndma_np,
-						  ndma_devs[ndma_num], eth_if->ethswitch.enabled);
+						  ndma_devs[ndma_num],
+						  eth_if->ethswitch.enabled ? adrv906x_eth_flood_callback : NULL);
 			if (ret) {
 				dev_err(dev, "failed to probe ndma device");
 				goto error_unregister_netdev;
@@ -1169,7 +1170,8 @@ error_unregister_netdev:
 				unregister_netdev(eth_if->adrv906x_dev[i]->ndev);
 			/* Then clean up phylink */
 			if (eth_if->adrv906x_dev[i]->phylink) {
-				if (eth_if->adrv906x_dev[i]->ndev->phydev)
+				if (eth_if->adrv906x_dev[i]->ndev &&
+				    eth_if->adrv906x_dev[i]->ndev->phydev)
 					phylink_disconnect_phy(eth_if->adrv906x_dev[i]->phylink);
 				phylink_destroy(eth_if->adrv906x_dev[i]->phylink);
 				eth_if->adrv906x_dev[i]->phylink = NULL;

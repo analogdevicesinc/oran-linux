@@ -1407,8 +1407,7 @@ static void adrv906x_ndma_clear_mac_table(struct adrv906x_ndma_dev *ndma_dev)
 }
 
 void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx_cb_fn,
-			ndma_pkt_callback rx_cb_fn, void *cb_param,
-			ndma_flood_callback flood_cb_fn)
+			ndma_pkt_callback rx_cb_fn, void *cb_param)
 {
 	struct adrv906x_ndma_chan *rx_chan = &ndma_dev->rx_chan;
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
@@ -1471,7 +1470,6 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 					  NDMA_TX_STATUS_DMA_ERR_IRQ |
 					  NDMA_TX_STATUS_DMA_DONE_IRQ);
 
-		ndma_dev->flood_cb_fn = flood_cb_fn;
 		ndma_dev->ndev = ndev;
 		ndma_dev->enabled = true;
 		kref_init(&ndma_dev->refcount);
@@ -2269,7 +2267,7 @@ static ssize_t adrv906x_ndma_mac_list_show(struct device *dev,
 
 int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 			struct device_node *ndma_np, struct adrv906x_ndma_dev *ndma_dev,
-			bool switch_enabled)
+			ndma_flood_callback flood_cb_fn)
 {
 	struct adrv906x_ndma_chan *rx_chan = &ndma_dev->rx_chan;
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
@@ -2284,7 +2282,7 @@ int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 	}
 	dev = &ndma_pdev->dev;
 	ndma_dev->dev = dev;
-	ndma_dev->flood_mitigate_supported = switch_enabled;
+	ndma_dev->flood_cb_fn = flood_cb_fn;
 
 	hash_init(ndma_dev->mac_table);
 	if (of_property_read_u32(ndma_np, "id", &ndma_dev->dev_num)) {
@@ -2295,7 +2293,7 @@ int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 	ret = adrv906x_ndma_device_init(ndma_dev, ndma_np);
 	if (ret)
 		return ret;
-	ret = adrv906x_ndma_get_reset_ctrl(ndma_dev, ndma_np, switch_enabled);
+	ret = adrv906x_ndma_get_reset_ctrl(ndma_dev, ndma_np, !!flood_cb_fn);
 	if (ret)
 		return ret;
 	ret = adrv906x_ndma_get_intr_ctrl(ndma_dev, ndma_np);
@@ -2314,40 +2312,38 @@ int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 	netif_napi_add_weight(ndev, &tx_chan->napi,
 			      adrv906x_ndma_tx_status_poll, NDMA_TX_NAPI_POLL_WEIGHT);
 
-	if (ndma_dev->flood_mitigate_supported) {
-		ndma_dev->attr_flood_mitigate.attr.name = "flood_mitigate";
-		ndma_dev->attr_flood_mitigate.attr.mode = 0664;
-		ndma_dev->attr_flood_mitigate.show = adrv906x_ndma_flood_mitigate_show;
-		ndma_dev->attr_flood_mitigate.store = adrv906x_ndma_flood_mitigate_store;
+	ndma_dev->attr_flood_mitigate.attr.name = "flood_mitigate";
+	ndma_dev->attr_flood_mitigate.attr.mode = 0664;
+	ndma_dev->attr_flood_mitigate.show = adrv906x_ndma_flood_mitigate_show;
+	ndma_dev->attr_flood_mitigate.store = adrv906x_ndma_flood_mitigate_store;
 
-		ndma_dev->attr_mac_add.attr.name = "mac_add";
-		ndma_dev->attr_mac_add.attr.mode = 0200;
-		ndma_dev->attr_mac_add.show = NULL;
-		ndma_dev->attr_mac_add.store = adrv906x_ndma_mac_add_store;
+	ndma_dev->attr_mac_add.attr.name = "mac_add";
+	ndma_dev->attr_mac_add.attr.mode = 0200;
+	ndma_dev->attr_mac_add.show = NULL;
+	ndma_dev->attr_mac_add.store = adrv906x_ndma_mac_add_store;
 
-		ndma_dev->attr_mac_remove.attr.name = "mac_remove";
-		ndma_dev->attr_mac_remove.attr.mode = 0200;
-		ndma_dev->attr_mac_remove.show = NULL;
-		ndma_dev->attr_mac_remove.store = adrv906x_ndma_mac_remove_store;
+	ndma_dev->attr_mac_remove.attr.name = "mac_remove";
+	ndma_dev->attr_mac_remove.attr.mode = 0200;
+	ndma_dev->attr_mac_remove.show = NULL;
+	ndma_dev->attr_mac_remove.store = adrv906x_ndma_mac_remove_store;
 
-		ndma_dev->attr_mac_list.attr.name = "mac_list";
-		ndma_dev->attr_mac_list.attr.mode = 0444;
-		ndma_dev->attr_mac_list.show = adrv906x_ndma_mac_list_show;
-		ndma_dev->attr_mac_list.store = NULL;
+	ndma_dev->attr_mac_list.attr.name = "mac_list";
+	ndma_dev->attr_mac_list.attr.mode = 0444;
+	ndma_dev->attr_mac_list.show = adrv906x_ndma_mac_list_show;
+	ndma_dev->attr_mac_list.store = NULL;
 
-		ndma_dev->attrs[0] = &ndma_dev->attr_flood_mitigate.attr;
-		ndma_dev->attrs[1] = &ndma_dev->attr_mac_add.attr;
-		ndma_dev->attrs[2] = &ndma_dev->attr_mac_remove.attr;
-		ndma_dev->attrs[3] = &ndma_dev->attr_mac_list.attr;
-		ndma_dev->attrs[4] = NULL;
+	ndma_dev->attrs[0] = &ndma_dev->attr_flood_mitigate.attr;
+	ndma_dev->attrs[1] = &ndma_dev->attr_mac_add.attr;
+	ndma_dev->attrs[2] = &ndma_dev->attr_mac_remove.attr;
+	ndma_dev->attrs[3] = &ndma_dev->attr_mac_list.attr;
+	ndma_dev->attrs[4] = NULL;
 
-		ndma_dev->attr_group.attrs = ndma_dev->attrs;
+	ndma_dev->attr_group.attrs = ndma_dev->attrs;
 
-		ret = sysfs_create_group(&ndma_dev->dev->kobj, &ndma_dev->attr_group);
-		if (ret) {
-			dev_err(ndma_dev->dev, "Failed to create sysfs group\n");
-			return ret;
-		}
+	ret = sysfs_create_group(&ndma_dev->dev->kobj, &ndma_dev->attr_group);
+	if (ret) {
+		dev_err(ndma_dev->dev, "Failed to create sysfs group\n");
+		return ret;
 	}
 
 	return 0;
@@ -2359,9 +2355,7 @@ void adrv906x_ndma_remove(struct adrv906x_ndma_dev *ndma_dev)
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
 
 	adrv906x_ndma_clear_mac_table(ndma_dev);
-
-	if (ndma_dev->flood_mitigate_supported)
-		sysfs_remove_group(&ndma_dev->dev->kobj, &ndma_dev->attr_group);
+	sysfs_remove_group(&ndma_dev->dev->kobj, &ndma_dev->attr_group);
 
 	cancel_delayed_work_sync(&tx_chan->tx_frames_timeout_work);
 	cancel_work_sync(&rx_chan->rx_flood_mitigate_work);

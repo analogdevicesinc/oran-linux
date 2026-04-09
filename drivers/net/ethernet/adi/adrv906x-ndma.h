@@ -197,7 +197,6 @@ struct adrv906x_ndma_dev {
 	struct workqueue_struct *wq;
 	bool loopback_en;
 	bool flood_mitigate_en;
-	bool flood_mitigate_supported;
 	ndma_flood_callback flood_cb_fn;
 	DECLARE_HASHTABLE(mac_table, NDMA_MAC_HASH_BITS);
 	int mac_count;
@@ -213,11 +212,10 @@ int adrv906x_ndma_start_xmit(struct adrv906x_ndma_dev *ndma_dev, struct sk_buff 
 			     unsigned char port, bool hw_tstamp_en, bool dsa_en);
 int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 			struct device_node *ndma_np, struct adrv906x_ndma_dev *ndma_dev,
-			bool switch_enabled);
+			ndma_flood_callback flood_cb_fn);
 void adrv906x_ndma_remove(struct adrv906x_ndma_dev *ndma_dev);
 void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx_cb_fn,
-			ndma_pkt_callback rx_cb_fn, void *cb_param,
-			ndma_flood_callback flood_cb_fn);
+			ndma_pkt_callback rx_cb_fn, void *cb_param);
 void adrv906x_ndma_close(struct adrv906x_ndma_dev *ndma_dev, struct net_device *ndev);
 void adrv906x_ndma_config_loopback(struct adrv906x_ndma_dev *ndma_dev, bool enable);
 void adrv906x_ndma_update_frame_drop_stats(struct adrv906x_ndma_dev *ndma_dev);
