@@ -33,6 +33,7 @@
 #define NDMA_TX_HDR_TYPE_SUBSEQ            BIT(1)
 #define NDMA_TX_HDR_TYPE_LOOPBACK          GENMASK(1, 0)
 #define NDMA_TX_HDR_TYPE_STATUS            GENMASK(1, 0)
+#define NDMA_TX_HDR_SOF_FRAME_LEN_MASK     GENMASK(7, 0)
 #define NDMA_TX_HDR_SOF_FR_PTP             BIT(2)
 #define NDMA_TX_HDR_SOF_PORT_ID            BIT(3)
 #define NDMA_TX_HDR_SOF_DSA_EN             BIT(4)
@@ -129,10 +130,10 @@ struct adrv906x_ndma_chan {
 	ndma_pkt_callback status_cb_fn;
 	void *cb_param;
 	spinlock_t lock; /* protects struct and register access */
-	unsigned char exp_seq_num;
-	unsigned char seq_num;
-	unsigned char ptp_exp_seq_num;
-	unsigned char ptp_seq_num;
+	u8 exp_seq_num;
+	u8 seq_num;
+	u8 ptp_exp_seq_num;
+	u8 ptp_seq_num;
 
 	/* TX DMA channel related fields */
 	void __iomem *tx_dma_base;
@@ -209,7 +210,7 @@ struct adrv906x_ndma_dev {
 };
 
 int adrv906x_ndma_start_xmit(struct adrv906x_ndma_dev *ndma_dev, struct sk_buff *skb,
-			     unsigned char port, bool hw_tstamp_en, bool dsa_en);
+			     u8 port, bool hw_tstamp_en, bool dsa_en);
 int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 			struct device_node *ndma_np, struct adrv906x_ndma_dev *ndma_dev,
 			ndma_flood_callback flood_cb_fn);
