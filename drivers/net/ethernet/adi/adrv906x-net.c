@@ -147,8 +147,21 @@ static void adrv906x_net_link_down(struct phylink_config *config, unsigned int m
 	netif_stop_queue(ndev);
 	adrv906x_mac_set_path(mac, false);
 
-	if (eth_if->ethswitch.enabled)
+	if (eth_if->ethswitch.enabled) {
 		adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
+
+		/* Clear this port's active flag and check if both ports are now down.
+		 * The flag prevents issues from multiple link_down calls or link_down
+		 * without a successful link_up.
+		 */
+		if (adrv906x_dev->link_active) {
+			adrv906x_dev->link_active = false;
+			/* Check if both front-haul ports are now down */
+			if (!eth_if->adrv906x_dev[0]->link_active &&
+			    !eth_if->adrv906x_dev[1]->link_active)
+				complete(&eth_if->both_links_down);
+		}
+	}
 }
 
 static void adrv906x_net_link_up(struct phylink_config *config,
@@ -178,6 +191,16 @@ static void adrv906x_net_link_up(struct phylink_config *config,
 
 	if (eth_if->ethswitch.enabled) {
 		val = speed == SPEED_10000 ? AGE_TIME_5MIN_10G : AGE_TIME_5MIN_25G;
+		/* Mark this port as active. Reset the completion when transitioning
+		 * from no active links to at least one active link.
+		 */
+		if (!adrv906x_dev->link_active) {
+			/* Check if this is the first link coming up */
+			if (!eth_if->adrv906x_dev[0]->link_active &&
+			    !eth_if->adrv906x_dev[1]->link_active)
+				reinit_completion(&eth_if->both_links_down);
+			adrv906x_dev->link_active = true;
+		}
 		adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
 		/* Trigger recovery to restore VLAN and FDB configuration after link up */
 		atomic_set(&es->error_pending, 1);
@@ -943,6 +966,7 @@ static int adrv906x_eth_probe(struct platform_device *pdev)
 	adrv906x_eth_cmn_rst_reg(eth_if->emac_cmn_regs);
 
 	mutex_init(&eth_if->mtx);
+	init_completion(&eth_if->both_links_down);
 
 	adrv906x_eth_cdr_get_recovered_clk_divs(np, eth_if);
 
@@ -1090,7 +1114,8 @@ no_macsec:
 
 			ret = adrv906x_ndma_probe(pdev, ndev, ndma_np,
 						  ndma_devs[ndma_num],
-						  eth_if->ethswitch.enabled ? adrv906x_eth_flood_callback : NULL);
+						  eth_if->ethswitch.enabled ?
+						  adrv906x_eth_flood_callback : NULL);
 			if (ret) {
 				dev_err(dev, "failed to probe ndma device");
 				goto error_unregister_netdev;

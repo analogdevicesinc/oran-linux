@@ -10,6 +10,7 @@
 #include <linux/etherdevice.h>
 #include <linux/net_tstamp.h>
 #include <linux/phylink.h>
+#include <linux/completion.h>
 #include "adrv906x-ndma.h"
 #include "adrv906x-mac.h"
 #include "adrv906x-switch.h"
@@ -51,6 +52,7 @@ struct adrv906x_eth_dev {
 	struct rtnl_link_stats64 rtnl_stats;
 	int tx_frames_pending;
 	int intf_recovery_resets;
+	bool link_active; /* true if this port's link is up and counted */
 	spinlock_t lock; /* protects struct access */
 };
 
@@ -64,6 +66,7 @@ struct adrv906x_eth_if {
 	struct mutex mtx; /* protects regs access */
 	u32 recovered_clk_div_10g;
 	u32 recovered_clk_div_25g;
+	struct completion both_links_down; /* signaled when both links are down */
 };
 
 #endif /* __ADRV906X_NET_H__ */

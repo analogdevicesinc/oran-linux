@@ -13,6 +13,7 @@
 #include <linux/string.h>
 #include <linux/bitfield.h>
 #include <linux/ethtool.h>
+#include <linux/completion.h>
 #include "adrv906x-net.h"
 #include "adrv906x-cmn.h"
 
@@ -74,16 +75,30 @@ void adrv906x_eth_cmn_pll_reset(struct net_device *ndev)
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
 	void __iomem *regs = eth_if->emac_cmn_regs;
+	unsigned long timeout;
 	u32 val;
 
-	/*
-	 * Both front‑haul ports are now down. Wait 50 ms so the switch driver can
-	 * finish handling the link‑down events and complete any ongoing updates.
+	/* When switch is enabled, wait for both links to be down.
 	 * This ensures that no switch reconfiguration is in progress when we
-	 * reconfigure the PLL, avoiding issues that can occur if both are updated
-	 * at the same time.
+	 * reconfigure the PLL, avoiding issues that can occur if both are
+	 * updated at the same time.
+	 *
+	 * Use a 1-second timeout to prevent indefinite blocking in case
+	 * the links don't go down as expected.
 	 */
-	msleep(50);
+	if (eth_if->ethswitch.enabled &&
+	    (eth_if->adrv906x_dev[0]->link_active ||
+	     eth_if->adrv906x_dev[1]->link_active)) {
+		timeout = wait_for_completion_timeout(&eth_if->both_links_down,
+						      msecs_to_jiffies(1000));
+		if (timeout == 0)
+			netdev_warn(ndev, "timeout waiting for both links to go down");
+	}
+
+	/* Allow 1-2ms for switch hardware to complete in-flight operations
+	 * before the PLL reset can safely proceed.
+	 */
+	usleep_range(1000, 2000);
 
 	mutex_lock(&eth_if->mtx);
 
