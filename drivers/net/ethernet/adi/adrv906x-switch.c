@@ -898,10 +898,11 @@ int adrv906x_switch_register_irqs(struct adrv906x_eth_switch *es, struct device_
 }
 
 int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device *pdev,
+			  struct device_node *eth_switch_np,
 			  int (*isr_pre_func)(void *), int (*isr_post_func)(void *), void *isr_arg)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *eth_switch_np, *switch_port_np;
+	struct device_node *switch_port_np;
 	u16 default_vids[] = { 2, 3, 4, 5 };
 	u32 reg, len, portid;
 	u8 mode_val, mode;
@@ -910,11 +911,6 @@ int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device
 	int ret;
 
 	es->pdev = pdev;
-	eth_switch_np = of_get_child_by_name(es->pdev->dev.of_node, "eth_switch");
-	if (!eth_switch_np) {
-		dev_info(dev, "dt: switch node missing");
-		return -ENODEV;
-	}
 
 	mutex_init(&es->lock);
 	es->attr_group.attrs = NULL;

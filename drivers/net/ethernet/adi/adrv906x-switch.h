@@ -195,6 +195,7 @@ int adrv906x_switch_port_enable(struct adrv906x_eth_switch *es, int portid, bool
 int adrv906x_switch_register_irqs(struct adrv906x_eth_switch *es,
 				  struct device_node *eth_switch_np);
 int adrv906x_switch_probe(struct adrv906x_eth_switch *es, struct platform_device *pdev,
+			  struct device_node *eth_switch_np,
 			  int (*isr_pre_func)(void *), int (*isr_post_func)(void *), void *isr_arg);
 int adrv906x_switch_init(struct adrv906x_eth_switch *es);
 void adrv906x_switch_set_mae_age_time(struct adrv906x_eth_switch *es, u8 data);

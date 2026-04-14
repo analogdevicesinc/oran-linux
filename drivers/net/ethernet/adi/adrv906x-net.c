@@ -940,7 +940,7 @@ static int adrv906x_eth_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	struct device_node *eth_ports_np, *port_np, *oran_if_np, *eth_recov_clk_np, *ndma_np,
-			   *mdio_np;
+			   *mdio_np, *eth_switch_np;
 	struct adrv906x_ndma_dev *ndma_devs[MAX_NETDEV_NUM] = { NULL };
 
 #if IS_ENABLED(CONFIG_MACSEC)
@@ -1000,11 +1000,19 @@ static int adrv906x_eth_probe(struct platform_device *pdev)
 	else
 		dev_warn(dev, "dt: eth_recov_clk_np node missing - skipping");
 
-	ret = adrv906x_switch_probe(&eth_if->ethswitch, pdev,
-				    &adrv906x_eth_switch_reset_soft_pre,
-				    &adrv906x_eth_switch_reset_soft_post, eth_if);
-	if (ret)
-		dev_warn(dev, "failed to probe switch - falling back to non-switch mode");
+	eth_switch_np = of_get_child_by_name(np, "eth_switch");
+	if (eth_switch_np) {
+		ret = adrv906x_switch_probe(&eth_if->ethswitch, pdev, eth_switch_np,
+					    &adrv906x_eth_switch_reset_soft_pre,
+					    &adrv906x_eth_switch_reset_soft_post, eth_if);
+		of_node_put(eth_switch_np);
+		if (ret) {
+			dev_err(dev, "failed to probe switch");
+			adrv906x_mdio_unregister(eth_if);
+			adrv906x_phy_unregister();
+			goto error;
+		}
+	}
 
 	for (i = 0; i < MAX_NETDEV_NUM; i++) {
 		/* Get port@i of node ethernet-ports */
