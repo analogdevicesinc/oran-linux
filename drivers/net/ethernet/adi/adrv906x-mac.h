@@ -10,6 +10,7 @@
 #include <linux/interrupt.h>
 #include <linux/atomic.h>
 #include <linux/io.h>
+#include <linux/mutex.h>
 
 #define MAC_IP_ID                        0x00000000
 #define MAC_IP_VERSION                   0x00000004
@@ -107,6 +108,7 @@ struct adrv906x_mac {
 	struct adrv906x_mac_tx_stats hw_stats_tx;
 	struct adrv906x_mac_rx_stats hw_stats_rx;
 	struct delayed_work update_stats;
+	struct mutex stats_lock; /* protects hw stats access and updates */
 };
 
 void adrv906x_mac_promiscuous_mode_en(struct adrv906x_mac *mac);
@@ -118,5 +120,6 @@ void adrv906x_mac_cleanup(struct adrv906x_mac *mac);
 int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size);
 void adrv906x_mac_set_path(struct adrv906x_mac *mac, bool enable);
 bool adrv906x_mac_link_stable(struct adrv906x_mac *mac);
+void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac);
 
 #endif /* __ADRV906X_MAC_H__ */

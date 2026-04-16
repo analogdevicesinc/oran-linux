@@ -962,6 +962,8 @@ void adrv906x_ndma_update_frame_drop_stats(struct adrv906x_ndma_dev *ndma_dev)
 	union adrv906x_ndma_chan_stats *stats = &rx_chan->stats;
 	u32 count;
 
+	spin_lock(&ndma_dev->lock);
+
 	count = ioread32(rx_chan->ctrl_base + NDMA_RX_FRAME_DROPPED_COUNT_SPLANE);
 	if (count < (u32)stats->rx.frame_dropped_splane_errors)
 		stats->rx.frame_dropped_splane_errors += BIT_ULL(32);
@@ -976,18 +978,18 @@ void adrv906x_ndma_update_frame_drop_stats(struct adrv906x_ndma_dev *ndma_dev)
 
 	stats->rx.frame_dropped_errors = stats->rx.frame_dropped_splane_errors
 					 + stats->rx.frame_dropped_mplane_errors;
+
+	spin_unlock(&ndma_dev->lock);
 }
 
-static void adrv906x_ndma_get_frame_drop_stats(struct work_struct *work)
+static void adrv906x_ndma_stats_work(struct work_struct *work)
 {
 	struct adrv906x_ndma_dev *ndma_dev =
 		container_of(work, struct adrv906x_ndma_dev, update_stats.work);
 
-	rtnl_lock();
 	adrv906x_ndma_update_frame_drop_stats(ndma_dev);
-	rtnl_unlock();
 
-	mod_delayed_work(system_long_wq, &ndma_dev->update_stats, msecs_to_jiffies(1000 * 60));
+	mod_delayed_work(system_long_wq, &ndma_dev->update_stats, msecs_to_jiffies(1000));
 }
 
 static void adrv906x_dma_tx_prep_desc_list(struct adrv906x_ndma_chan *ndma_ch)
@@ -1256,7 +1258,7 @@ static int adrv906x_ndma_device_init(struct adrv906x_ndma_dev *ndma_dev, struct 
 
 	INIT_WORK(&rx_chan->rx_flood_mitigate_work, adrv906x_ndma_rx_flood_evt_handler);
 	INIT_DELAYED_WORK(&tx_chan->tx_frames_timeout_work, adrv906x_ndma_tx_recovery_handler);
-	INIT_DELAYED_WORK(&ndma_dev->update_stats, adrv906x_ndma_get_frame_drop_stats);
+	INIT_DELAYED_WORK(&ndma_dev->update_stats, adrv906x_ndma_stats_work);
 
 	return ret;
 }
@@ -2441,6 +2443,7 @@ void adrv906x_ndma_remove(struct adrv906x_ndma_dev *ndma_dev)
 	adrv906x_ndma_clear_mac_table(ndma_dev);
 	sysfs_remove_group(&ndma_dev->dev->kobj, &ndma_dev->attr_group);
 	cancel_delayed_work_sync(&tx_chan->tx_frames_timeout_work);
+	cancel_delayed_work_sync(&ndma_dev->update_stats);
 	cancel_work_sync(&rx_chan->rx_flood_mitigate_work);
 	if (ndma_dev->wq)
 		destroy_workqueue(ndma_dev->wq);

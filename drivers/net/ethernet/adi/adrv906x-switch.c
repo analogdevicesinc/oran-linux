@@ -759,14 +759,12 @@ static irqreturn_t adrv906x_switch_error_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void adrv906x_switch_update_hw_stats(struct work_struct *work)
+void adrv906x_switch_update_hw_stats(struct adrv906x_eth_switch *es)
 {
-	struct adrv906x_eth_switch *es = container_of(work, struct adrv906x_eth_switch,
-						      update_stats.work);
 	u32 val;
 	int i;
 
-	rtnl_lock();
+	mutex_lock(&es->lock);
 
 	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
 		val = ioread32(es->switch_port[i].reg + SWITCH_PORT_STATS_CTRL);
@@ -839,7 +837,15 @@ static void adrv906x_switch_update_hw_stats(struct work_struct *work)
 		es->port_stats[i].crd_buffer_drop += val;
 	}
 
-	rtnl_unlock();
+	mutex_unlock(&es->lock);
+}
+
+static void adrv906x_switch_stats_work(struct work_struct *work)
+{
+	struct adrv906x_eth_switch *es = container_of(work, struct adrv906x_eth_switch,
+						      update_stats.work);
+
+	adrv906x_switch_update_hw_stats(es);
 
 	mod_delayed_work(system_long_wq, &es->update_stats, msecs_to_jiffies(1000));
 }
@@ -1029,7 +1035,7 @@ void adrv906x_switch_cleanup(struct adrv906x_eth_switch *es)
 		kthread_stop(es->recovery_task);
 		es->recovery_task = NULL;
 	}
-	cancel_delayed_work(&es->update_stats);
+	cancel_delayed_work_sync(&es->update_stats);
 }
 
 static int adrv906x_switch_vlan_membership_recovery(struct adrv906x_eth_switch *es)
@@ -1140,11 +1146,11 @@ int adrv906x_switch_init(struct adrv906x_eth_switch *es)
 			return ret;
 	}
 
-#define __SWITCH_ATTR_RW(_name) {                                                                 \
-		es->_name ## _attr.attr.name = __stringify(_name);                                \
-		es->_name ## _attr.attr.mode = VERIFY_OCTAL_PERMISSIONS(0644);                    \
-		es->_name ## _attr.show = _name ## _show;                                         \
-		es->_name ## _attr.store = _name ## _store;                                       \
+#define __SWITCH_ATTR_RW(_name) {                                                         \
+	es->_name ## _attr.attr.name = __stringify(_name);                                \
+	es->_name ## _attr.attr.mode = VERIFY_OCTAL_PERMISSIONS(0644);                    \
+	es->_name ## _attr.show = _name ## _show;                                         \
+	es->_name ## _attr.store = _name ## _store;                                       \
 }
 
 	__SWITCH_ATTR_RW(port_vlan_ctrl);
@@ -1160,7 +1166,7 @@ int adrv906x_switch_init(struct adrv906x_eth_switch *es)
 		}
 	}
 
-	INIT_DELAYED_WORK(&es->update_stats, adrv906x_switch_update_hw_stats);
+	INIT_DELAYED_WORK(&es->update_stats, adrv906x_switch_stats_work);
 	mod_delayed_work(system_long_wq, &es->update_stats, msecs_to_jiffies(1000));
 
 	init_waitqueue_head(&es->recovery_wq);

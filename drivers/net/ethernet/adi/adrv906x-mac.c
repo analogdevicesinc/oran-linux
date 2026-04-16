@@ -186,11 +186,11 @@ static void adrv906x_mac_update_rx_stats(struct adrv906x_mac *mac)
 	adrv906x_mac_update_general_stats(mac->emac_rx, &mac->hw_stats_rx.general_stats);
 }
 
-static void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac)
+void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac)
 {
 	u32 val;
 
-	rtnl_lock();
+	mutex_lock(&mac->stats_lock);
 
 	val = ioread32(mac->xmac + MAC_GENERAL_CONTROL);
 	val |= TX_STATS_SNAPSHOT_BIT | RX_STATS_SNAPSHOT_BIT;
@@ -199,7 +199,7 @@ static void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac)
 	adrv906x_mac_update_tx_stats(mac);
 	adrv906x_mac_update_rx_stats(mac);
 
-	rtnl_unlock();
+	mutex_unlock(&mac->stats_lock);
 }
 
 static void adrv906x_mac_stats_work(struct work_struct *work)
@@ -238,7 +238,8 @@ bool adrv906x_mac_link_stable(struct adrv906x_mac *mac)
 
 void adrv906x_mac_cleanup(struct adrv906x_mac *mac)
 {
-	cancel_delayed_work(&mac->update_stats);
+	cancel_delayed_work_sync(&mac->update_stats);
+	mutex_destroy(&mac->stats_lock);
 }
 
 int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size)
@@ -252,6 +253,7 @@ int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size)
 	adrv906x_mac_tx_path_dis(mac);
 	adrv906x_mac_rx_path_dis(mac);
 
+	mutex_init(&mac->stats_lock);
 	INIT_DELAYED_WORK(&mac->update_stats, adrv906x_mac_stats_work);
 	mod_delayed_work(system_long_wq, &mac->update_stats, msecs_to_jiffies(1000));
 

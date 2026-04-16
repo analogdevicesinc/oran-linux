@@ -364,8 +364,13 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 	struct adrv906x_mac_tx_stats *mac_tx_stats = &adrv906x_dev->mac.hw_stats_tx;
 	int i, base_idx;
 
+	/* Refresh all stats from hardware before reading */
+	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac);
+	adrv906x_switch_update_hw_stats(es);
 	adrv906x_ndma_update_frame_drop_stats(adrv906x_dev->ndma_dev);
 
+	/* Read MAC stats under lock to prevent race with delayed work */
+	mutex_lock(&adrv906x_dev->mac.stats_lock);
 	data[0] = mac_rx_stats->general_stats.drop_events;
 	data[1] = mac_rx_stats->general_stats.octets;
 	data[2] = mac_rx_stats->general_stats.pkts;
@@ -405,7 +410,12 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 	data[36] = mac_tx_stats->general_stats.pkts_1519tox_octets;
 	data[37] = mac_tx_stats->underflow;
 	data[38] = mac_tx_stats->padded;
+	mutex_unlock(&adrv906x_dev->mac.stats_lock);
+
 	data[39] = adrv906x_dev->intf_recovery_resets;
+
+	/* Read NDMA stats under lock to prevent race with delayed work */
+	spin_lock(&adrv906x_dev->ndma_dev->lock);
 	data[40] = ndma_rx_stats->rx.frame_errors;
 	data[41] = ndma_rx_stats->rx.frame_size_errors;
 	data[42] = ndma_rx_stats->rx.frame_dropped_errors;
@@ -429,8 +439,12 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 	data[60] = ndma_tx_stats->tx.data_dma_errors;
 	data[61] = ndma_tx_stats->tx.status_dma_errors;
 	data[62] = ndma_tx_stats->tx.recovery_count;
+	spin_unlock(&adrv906x_dev->ndma_dev->lock);
+
 	data[63] = atomic64_read(&es->port_reset_count);
 
+	/* Read switch stats under lock to prevent race with delayed work */
+	mutex_lock(&es->lock);
 	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
 		base_idx = 64 + i * (SWITCH_PORT_STATS_NUM + 1);
 
@@ -473,6 +487,7 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 		data[base_idx + 30] = es->port_stats[i].bcast_bytes_tx;
 		data[base_idx + 31] = es->port_stats[i].crd_buffer_drop;
 	}
+	mutex_unlock(&es->lock);
 }
 
 static const struct ethtool_rmon_hist_range adrv906x_ethtool_rmon_ranges[] = {
@@ -496,8 +511,11 @@ static void adrv906x_ethtool_get_rmon_stats(struct net_device *ndev,
 
 	*ranges = adrv906x_ethtool_rmon_ranges;
 
-	adrv906x_ndma_update_frame_drop_stats(adrv906x_dev->ndma_dev);
+	/* Refresh stats from hardware before reading */
+	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac);
 
+	/* Read MAC stats under lock to prevent race with delayed work */
+	mutex_lock(&adrv906x_dev->mac.stats_lock);
 	stats->undersize_pkts = mac_rx_stats->general_stats.undersize_pkts;
 	stats->oversize_pkts = mac_rx_stats->general_stats.oversize_pkts;
 	stats->fragments = mac_rx_stats->fragments;
@@ -516,6 +534,7 @@ static void adrv906x_ethtool_get_rmon_stats(struct net_device *ndev,
 	stats->hist_tx[4] = mac_tx_stats->general_stats.pkts_512to1023_octets;
 	stats->hist_tx[5] = mac_tx_stats->general_stats.pkts_1024to1518_octets;
 	stats->hist_tx[6] = mac_tx_stats->general_stats.pkts_1519tox_octets;
+	mutex_unlock(&adrv906x_dev->mac.stats_lock);
 }
 
 static int adrv906x_ethtool_get_fecparam(struct net_device *ndev,

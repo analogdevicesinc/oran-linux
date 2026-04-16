@@ -698,6 +698,8 @@ static int adrv906x_eth_stop(struct net_device *ndev)
 
 static void adrv906x_get_rtnl_stats(struct adrv906x_eth_dev *adrv906x_dev)
 {
+	/* Read MAC stats under lock to prevent race with delayed work */
+	mutex_lock(&adrv906x_dev->mac.stats_lock);
 	adrv906x_dev->rtnl_stats.tx_packets =
 		adrv906x_dev->mac.hw_stats_tx.general_stats.unicast_pkts +
 		adrv906x_dev->mac.hw_stats_tx.general_stats.multicast_pkts +
@@ -735,6 +737,7 @@ static void adrv906x_get_rtnl_stats(struct adrv906x_eth_dev *adrv906x_dev)
 		adrv906x_dev->mac.hw_stats_rx.general_stats.drop_events;
 	adrv906x_dev->rtnl_stats.multicast =
 		adrv906x_dev->mac.hw_stats_rx.general_stats.multicast_pkts;
+	mutex_unlock(&adrv906x_dev->mac.stats_lock);
 }
 
 static void adrv906x_eth_get_stats64(struct net_device *ndev,
