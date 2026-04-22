@@ -10,6 +10,7 @@
 #include <linux/bitfield.h>
 #include <net/rtnetlink.h>
 #include "adrv906x-mac.h"
+#include "adrv906x-net.h"
 
 #define ADRV906X_MAC_LINK_TEST_RETRIES 5
 
@@ -186,9 +187,18 @@ static void adrv906x_mac_update_rx_stats(struct adrv906x_mac *mac)
 	adrv906x_mac_update_general_stats(mac->emac_rx, &mac->hw_stats_rx.general_stats);
 }
 
-void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac)
+void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac, bool force)
 {
+	struct adrv906x_eth_dev *adrv906x_dev = container_of(mac, struct adrv906x_eth_dev, mac);
 	u32 val;
+
+	/* Skip stats update if this interface is down, unless forced.
+	 * The PLL may be unlocked or undergoing reconfiguration, making
+	 * register access unreliable. Force is used during link stability
+	 * checks before link_active is set.
+	 */
+	if (!force && !READ_ONCE(adrv906x_dev->link_active))
+		return;
 
 	mutex_lock(&mac->stats_lock);
 
@@ -206,7 +216,7 @@ static void adrv906x_mac_stats_work(struct work_struct *work)
 {
 	struct adrv906x_mac *mac = container_of(work, struct adrv906x_mac, update_stats.work);
 
-	adrv906x_mac_update_hw_stats(mac);
+	adrv906x_mac_update_hw_stats(mac, false);
 
 	mod_delayed_work(system_long_wq, &mac->update_stats, msecs_to_jiffies(1000));
 }
@@ -217,7 +227,7 @@ bool adrv906x_mac_link_stable(struct adrv906x_mac *mac)
 	u64 rs0, rs1;
 	int i = 0;
 
-	adrv906x_mac_update_hw_stats(mac);
+	adrv906x_mac_update_hw_stats(mac, true);
 	rs0 = 0;
 	rs1 = mac->hw_stats_rx.rs_framing_error;
 
@@ -226,7 +236,7 @@ bool adrv906x_mac_link_stable(struct adrv906x_mac *mac)
 
 		prev_stable = rs0 == rs1;
 		rs0 = rs1;
-		adrv906x_mac_update_hw_stats(mac);
+		adrv906x_mac_update_hw_stats(mac, true);
 		rs1 = mac->hw_stats_rx.rs_framing_error;
 
 		i++;

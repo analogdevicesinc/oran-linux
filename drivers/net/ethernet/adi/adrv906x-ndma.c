@@ -964,6 +964,11 @@ void adrv906x_ndma_update_frame_drop_stats(struct adrv906x_ndma_dev *ndma_dev)
 
 	spin_lock(&ndma_dev->lock);
 
+	if (!ndma_dev->enabled) {
+		spin_unlock(&ndma_dev->lock);
+		return;
+	}
+
 	count = ioread32(rx_chan->ctrl_base + NDMA_RX_FRAME_DROPPED_COUNT_SPLANE);
 	if (count < (u32)stats->rx.frame_dropped_splane_errors)
 		stats->rx.frame_dropped_splane_errors += BIT_ULL(32);
@@ -1495,12 +1500,11 @@ static void adrv906x_ndma_clear_mac_table(struct adrv906x_ndma_dev *ndma_dev)
 	}
 }
 
-void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx_cb_fn,
-			ndma_pkt_callback rx_cb_fn, void *cb_param)
+void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev)
 {
 	struct adrv906x_ndma_chan *rx_chan = &ndma_dev->rx_chan;
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
-	struct net_device *ndev = (struct net_device *)cb_param;
+	struct net_device *ndev = (struct net_device *)tx_chan->cb_param;
 	unsigned long flags0, flags1;
 
 	spin_lock_irqsave(&ndma_dev->lock, flags0);
@@ -1525,8 +1529,6 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 		adrv906x_ndma_chan_enable(rx_chan);
 		spin_unlock_irqrestore(&rx_chan->lock, flags1);
 
-		tx_chan->status_cb_fn = tx_cb_fn;
-		tx_chan->cb_param = cb_param;
 		tx_chan->rx_head = 0;
 		tx_chan->rx_tail = 0;
 		tx_chan->rx_free = 0;
@@ -1542,8 +1544,6 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev, ndma_pkt_callback tx
 		napi_enable(&tx_chan->napi);
 
 		rx_chan->exp_seq_num = 0;
-		rx_chan->status_cb_fn = rx_cb_fn;
-		rx_chan->cb_param = cb_param;
 		rx_chan->rx_head = 0;
 		rx_chan->rx_tail = 0;
 		rx_chan->rx_free = 0;
@@ -2357,7 +2357,8 @@ static ssize_t adrv906x_ndma_mac_list_show(struct device *dev,
 
 int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 			struct device_node *ndma_np, struct adrv906x_ndma_dev *ndma_dev,
-			ndma_flood_callback flood_cb_fn)
+			ndma_flood_callback flood_cb_fn, ndma_pkt_callback tx_cb_fn,
+			ndma_pkt_callback rx_cb_fn, void *cb_param)
 {
 	struct adrv906x_ndma_chan *rx_chan = &ndma_dev->rx_chan;
 	struct adrv906x_ndma_chan *tx_chan = &ndma_dev->tx_chan;
@@ -2374,6 +2375,10 @@ int adrv906x_ndma_probe(struct platform_device *pdev, struct net_device *ndev,
 	dev = &ndma_pdev->dev;
 	ndma_dev->dev = dev;
 	ndma_dev->flood_cb_fn = flood_cb_fn;
+	tx_chan->status_cb_fn = tx_cb_fn;
+	tx_chan->cb_param = cb_param;
+	rx_chan->status_cb_fn = rx_cb_fn;
+	rx_chan->cb_param = cb_param;
 
 	hash_init(ndma_dev->mac_table);
 	if (of_property_read_u32(ndma_np, "id", &ndma_dev->dev_num)) {

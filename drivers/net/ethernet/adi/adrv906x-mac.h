@@ -120,6 +120,6 @@ void adrv906x_mac_cleanup(struct adrv906x_mac *mac);
 int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size);
 void adrv906x_mac_set_path(struct adrv906x_mac *mac, bool enable);
 bool adrv906x_mac_link_stable(struct adrv906x_mac *mac);
-void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac);
+void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac, bool force);
 
 #endif /* __ADRV906X_MAC_H__ */

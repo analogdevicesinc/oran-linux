@@ -766,6 +766,15 @@ void adrv906x_switch_update_hw_stats(struct adrv906x_eth_switch *es)
 
 	mutex_lock(&es->lock);
 
+	/* Skip stats update if all FH interfaces are down. The PLL may be
+	 * unlocked or undergoing reconfiguration, making register access
+	 * unreliable.
+	 */
+	if (!(es->port_enabled_mask & ~BIT(SWITCH_CPU_PORT))) {
+		mutex_unlock(&es->lock);
+		return;
+	}
+
 	for (i = 0; i < SWITCH_MAX_PORT_NUM; i++) {
 		val = ioread32(es->switch_port[i].reg + SWITCH_PORT_STATS_CTRL);
 		val |= SWITCH_PORT_SNAPSHOT_EN;

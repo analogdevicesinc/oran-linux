@@ -19,5 +19,6 @@ int adrv906x_serdes_lnk_up_req(struct phy_device *phydev);
 int adrv906x_serdes_lnk_down_req(struct phy_device *phydev);
 int adrv906x_serdes_genl_register_family(void);
 int adrv906x_serdes_genl_unregister_family(void);
+bool adrv906x_serdes_pll_locked(struct phy_device *phydev);
 
 #endif /* __ADRV906X_SERDES_H__ */

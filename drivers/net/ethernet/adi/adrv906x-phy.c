@@ -258,9 +258,20 @@ static int adrv906x_phy_read_status(struct phy_device *phydev)
 	bool pcs_block_lock;
 	int val;
 
+	/* Skip status read if PLL is not locked (10G_RUN or 25G_RUN state).
+	 * During PLL reconfiguration, register access may be unreliable.
+	 * Clear link state to avoid reporting stale link-up status.
+	 */
+	if (!adrv906x_serdes_pll_locked(phydev)) {
+		phydev->link = 0;
+		phydev->speed = SPEED_UNKNOWN;
+		phydev->duplex = DUPLEX_UNKNOWN;
+		phydev->interface = PHY_INTERFACE_MODE_NA;
+		return 0;
+	}
+
 	if (phydev->loopback_enabled) {
 		phydev->link = 1;
-		pcs_block_lock = true;
 	} else {
 		phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2); /* Dummy read */
 		val = phy_read_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_BRMGBT_STAT2);

@@ -130,137 +130,6 @@ static ssize_t recovered_clock_output_store(struct device *dev,
 
 static DEVICE_ATTR_RW(recovered_clock_output);
 
-static void adrv906x_net_config(struct phylink_config *config, unsigned int mode,
-				const struct phylink_link_state *state)
-{
-}
-
-static void adrv906x_net_link_down(struct phylink_config *config, unsigned int mode,
-				   phy_interface_t interface)
-{
-	struct net_device *ndev = to_net_dev(config->dev);
-	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
-	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
-	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
-	struct adrv906x_mac *mac = &adrv906x_dev->mac;
-
-	netif_stop_queue(ndev);
-	adrv906x_mac_set_path(mac, false);
-
-	if (eth_if->ethswitch.enabled) {
-		adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
-
-		/* Clear this port's active flag and check if both ports are now down.
-		 * The flag prevents issues from multiple link_down calls or link_down
-		 * without a successful link_up.
-		 */
-		if (adrv906x_dev->link_active) {
-			adrv906x_dev->link_active = false;
-			/* Check if both front-haul ports are now down */
-			if (!eth_if->adrv906x_dev[0]->link_active &&
-			    !eth_if->adrv906x_dev[1]->link_active)
-				complete(&eth_if->both_links_down);
-		}
-	}
-}
-
-static void adrv906x_net_link_up(struct phylink_config *config,
-				 struct phy_device *phy,
-				 unsigned int mode, phy_interface_t interface,
-				 int speed, int duplex,
-				 bool tx_pause, bool rx_pause)
-{
-	struct net_device *ndev = to_net_dev(config->dev);
-	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
-	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
-	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
-	struct adrv906x_mac *mac = &adrv906x_dev->mac;
-	struct adrv906x_tsu *tsu = &adrv906x_dev->tsu;
-	u32 val;
-
-	/* Check MAC link stability and reset PCS if needed */
-	if (!adrv906x_mac_link_stable(mac) && phy) {
-		adrv906x_phy_pcs_reset_rx(phy);
-		adrv906x_dev->intf_recovery_resets++;
-		return;
-	}
-
-	adrv906x_tsu_set_speed(tsu, speed);
-	adrv906x_eth_cmn_recovered_clk_config(adrv906x_dev);
-	adrv906x_mac_set_path(mac, true);
-
-	if (eth_if->ethswitch.enabled) {
-		val = speed == SPEED_10000 ? AGE_TIME_5MIN_10G : AGE_TIME_5MIN_25G;
-		/* Mark this port as active. Reset the completion when transitioning
-		 * from no active links to at least one active link.
-		 */
-		if (!adrv906x_dev->link_active) {
-			/* Check if this is the first link coming up */
-			if (!eth_if->adrv906x_dev[0]->link_active &&
-			    !eth_if->adrv906x_dev[1]->link_active)
-				reinit_completion(&eth_if->both_links_down);
-			adrv906x_dev->link_active = true;
-		}
-		adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
-		/* Trigger recovery to restore VLAN and FDB configuration after link up */
-		atomic_set(&es->error_pending, 1);
-		wake_up_interruptible(&es->recovery_wq);
-		adrv906x_switch_set_mae_age_time(es, val);
-	}
-
-	netif_wake_queue(ndev);
-}
-
-static const struct phylink_mac_ops adrv906x_net_ops = {
-	.mac_config = adrv906x_net_config,
-	.mac_link_down = adrv906x_net_link_down,
-	.mac_link_up = adrv906x_net_link_up,
-};
-
-static int adrv906x_eth_phylink_init(struct net_device *ndev, struct device_node *port_np)
-{
-	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
-	struct device *dev = adrv906x_dev->dev;
-	struct phylink *phylink;
-	int ret;
-
-	/* Configure phylink_config */
-	adrv906x_dev->phylink_config.dev = &ndev->dev;
-	adrv906x_dev->phylink_config.type = PHYLINK_NETDEV;
-
-	/* Set MAC capabilities for 10G/25G fiber-based interfaces */
-	adrv906x_dev->phylink_config.mac_capabilities =
-		MAC_10000FD | MAC_25000FD;
-
-	/* Set supported interfaces - PHY handles 10GBASE-R and 25GBASE-R PCS */
-	__set_bit(PHY_INTERFACE_MODE_10GBASER,
-		  adrv906x_dev->phylink_config.supported_interfaces);
-	__set_bit(PHY_INTERFACE_MODE_25GBASER,
-		  adrv906x_dev->phylink_config.supported_interfaces);
-
-	/* Create phylink instance */
-	phylink = phylink_create(&adrv906x_dev->phylink_config,
-				 of_fwnode_handle(port_np),
-				 PHY_INTERFACE_MODE_NA,
-				 &adrv906x_net_ops);
-	if (IS_ERR(phylink)) {
-		dev_err(dev, "failed to create phylink");
-		return PTR_ERR(phylink);
-	}
-
-	adrv906x_dev->phylink = phylink;
-
-	/* Connect PHY through phylink - PHY reports PCS status via read_status() */
-	ret = phylink_of_phy_connect(phylink, port_np, 0);
-	if (ret) {
-		dev_err(dev, "could not connect to phy via phylink");
-		phylink_destroy(phylink);
-		return ret;
-	}
-
-	return 0;
-}
-
 static void __add_tx_hw_tstamp(struct sk_buff *skb, struct timespec64 *ts)
 {
 	struct skb_shared_hwtstamps shhwtstamps;
@@ -387,6 +256,145 @@ static void adrv906x_eth_rx_callback(struct sk_buff *skb, unsigned int port_id,
 	__add_rx_hw_tstamp(skb, ts);
 	skb->protocol = eth_type_trans(skb, ndev);
 	netif_receive_skb(skb);
+}
+
+static void adrv906x_net_config(struct phylink_config *config, unsigned int mode,
+				const struct phylink_link_state *state)
+{
+}
+
+static void adrv906x_net_link_down(struct phylink_config *config, unsigned int mode,
+				   phy_interface_t interface)
+{
+	struct net_device *ndev = to_net_dev(config->dev);
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
+	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
+	struct adrv906x_mac *mac = &adrv906x_dev->mac;
+
+	/* Only tear down if the link was active. This prevents issues from
+	 * multiple link_down calls or link_down without a successful link_up,
+	 * which would cause NDMA refcount underflow.
+	 */
+	if (READ_ONCE(adrv906x_dev->link_active)) {
+		netif_stop_queue(ndev);
+		adrv906x_mac_set_path(mac, false);
+		adrv906x_ndma_close(adrv906x_dev->ndma_dev, ndev);
+
+		WRITE_ONCE(adrv906x_dev->link_active, false);
+		/* Check if both front-haul ports are now down */
+		if (!READ_ONCE(eth_if->adrv906x_dev[0]->link_active) &&
+		    !READ_ONCE(eth_if->adrv906x_dev[1]->link_active))
+			complete(&eth_if->both_links_down);
+	}
+
+	if (eth_if->ethswitch.enabled)
+		adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
+}
+
+static void adrv906x_net_link_up(struct phylink_config *config,
+				 struct phy_device *phy,
+				 unsigned int mode, phy_interface_t interface,
+				 int speed, int duplex,
+				 bool tx_pause, bool rx_pause)
+{
+	struct net_device *ndev = to_net_dev(config->dev);
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
+	struct adrv906x_eth_switch *es = &eth_if->ethswitch;
+	struct adrv906x_mac *mac = &adrv906x_dev->mac;
+	struct adrv906x_tsu *tsu = &adrv906x_dev->tsu;
+	u32 val;
+
+	adrv906x_tsu_set_speed(tsu, speed);
+	adrv906x_eth_cmn_recovered_clk_config(adrv906x_dev);
+	adrv906x_mac_set_path(mac, true);
+
+	/* Check MAC link stability and reset PCS if needed. MAC must be
+	 * enabled before this check so statistics can be read.
+	 */
+	if (!adrv906x_mac_link_stable(mac) && phy) {
+		adrv906x_mac_set_path(mac, false);
+		adrv906x_phy_pcs_reset_rx(phy);
+		adrv906x_dev->intf_recovery_resets++;
+		return;
+	}
+
+	/* Only bring up NDMA and mark link active on down->up transition.
+	 * This prevents NDMA refcount imbalance if phylink generates multiple
+	 * link_up callbacks without matching link_down calls.
+	 */
+	if (!READ_ONCE(adrv906x_dev->link_active)) {
+		adrv906x_ndma_open(adrv906x_dev->ndma_dev);
+
+		/* Check if this is the first link coming up */
+		if (!READ_ONCE(eth_if->adrv906x_dev[0]->link_active) &&
+		    !READ_ONCE(eth_if->adrv906x_dev[1]->link_active))
+			reinit_completion(&eth_if->both_links_down);
+
+		WRITE_ONCE(adrv906x_dev->link_active, true);
+
+		if (eth_if->ethswitch.enabled) {
+			val = speed == SPEED_10000 ? AGE_TIME_5MIN_10G : AGE_TIME_5MIN_25G;
+			adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
+			/* Trigger recovery to restore VLAN and FDB configuration after link up */
+			atomic_set(&es->error_pending, 1);
+			wake_up_interruptible(&es->recovery_wq);
+			adrv906x_switch_set_mae_age_time(es, val);
+		}
+
+		netif_wake_queue(ndev);
+	}
+}
+
+static const struct phylink_mac_ops adrv906x_net_ops = {
+	.mac_config = adrv906x_net_config,
+	.mac_link_down = adrv906x_net_link_down,
+	.mac_link_up = adrv906x_net_link_up,
+};
+
+static int adrv906x_eth_phylink_init(struct net_device *ndev, struct device_node *port_np)
+{
+	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct device *dev = adrv906x_dev->dev;
+	struct phylink *phylink;
+	int ret;
+
+	/* Configure phylink_config */
+	adrv906x_dev->phylink_config.dev = &ndev->dev;
+	adrv906x_dev->phylink_config.type = PHYLINK_NETDEV;
+
+	/* Set MAC capabilities for 10G/25G fiber-based interfaces */
+	adrv906x_dev->phylink_config.mac_capabilities =
+		MAC_10000FD | MAC_25000FD;
+
+	/* Set supported interfaces - PHY handles 10GBASE-R and 25GBASE-R PCS */
+	__set_bit(PHY_INTERFACE_MODE_10GBASER,
+		  adrv906x_dev->phylink_config.supported_interfaces);
+	__set_bit(PHY_INTERFACE_MODE_25GBASER,
+		  adrv906x_dev->phylink_config.supported_interfaces);
+
+	/* Create phylink instance */
+	phylink = phylink_create(&adrv906x_dev->phylink_config,
+				 of_fwnode_handle(port_np),
+				 PHY_INTERFACE_MODE_NA,
+				 &adrv906x_net_ops);
+	if (IS_ERR(phylink)) {
+		dev_err(dev, "failed to create phylink");
+		return PTR_ERR(phylink);
+	}
+
+	adrv906x_dev->phylink = phylink;
+
+	/* Connect PHY through phylink - PHY reports PCS status via read_status() */
+	ret = phylink_of_phy_connect(phylink, port_np, 0);
+	if (ret) {
+		dev_err(dev, "could not connect to phy via phylink");
+		phylink_destroy(phylink);
+		return ret;
+	}
+
+	return 0;
 }
 
 static void adrv906x_eth_flood_callback(struct net_device *ndev,
@@ -666,12 +674,9 @@ static int adrv906x_eth_switch_reset_soft_post(void *arg)
 static int adrv906x_eth_open(struct net_device *ndev)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
-	struct adrv906x_ndma_dev *ndma_dev = adrv906x_dev->ndma_dev;
 
 	adrv906x_eth_oran_if_en(&adrv906x_dev->oif);
 	phylink_start(adrv906x_dev->phylink);
-	adrv906x_ndma_open(ndma_dev, adrv906x_eth_tx_callback, adrv906x_eth_rx_callback,
-			   ndev);
 
 #if IS_ENABLED(CONFIG_MACSEC)
 	if (adrv906x_dev->macsec)
@@ -687,10 +692,8 @@ static int adrv906x_eth_open(struct net_device *ndev)
 static int adrv906x_eth_stop(struct net_device *ndev)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
-	struct adrv906x_ndma_dev *ndma_dev = adrv906x_dev->ndma_dev;
 
 	netif_stop_queue(ndev);
-	adrv906x_ndma_close(ndma_dev, ndev);
 	phylink_stop(adrv906x_dev->phylink);
 
 	return 0;
@@ -1126,7 +1129,10 @@ no_macsec:
 			ret = adrv906x_ndma_probe(pdev, ndev, ndma_np,
 						  ndma_devs[ndma_num],
 						  eth_if->ethswitch.enabled ?
-						  adrv906x_eth_flood_callback : NULL);
+						  adrv906x_eth_flood_callback : NULL,
+						  adrv906x_eth_tx_callback,
+						  adrv906x_eth_rx_callback,
+						  ndev);
 			if (ret) {
 				dev_err(dev, "failed to probe ndma device");
 				goto error_unregister_netdev;

@@ -365,7 +365,7 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 	int i, base_idx;
 
 	/* Refresh all stats from hardware before reading */
-	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac);
+	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac, false);
 	adrv906x_switch_update_hw_stats(es);
 	adrv906x_ndma_update_frame_drop_stats(adrv906x_dev->ndma_dev);
 
@@ -512,7 +512,7 @@ static void adrv906x_ethtool_get_rmon_stats(struct net_device *ndev,
 	*ranges = adrv906x_ethtool_rmon_ranges;
 
 	/* Refresh stats from hardware before reading */
-	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac);
+	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac, false);
 
 	/* Read MAC stats under lock to prevent race with delayed work */
 	mutex_lock(&adrv906x_dev->mac.stats_lock);
@@ -779,7 +779,9 @@ static int adrv906x_phy_loopback_config(struct net_device *ndev, bool enable)
 			adrv906x_switch_port_enable(es, other_port, false);
 			adrv906x_switch_port_enable(es, adrv906x_dev->port, true);
 		}
+		adrv906x_ndma_open(adrv906x_dev->ndma_dev);
 	} else {
+		adrv906x_ndma_close(adrv906x_dev->ndma_dev, ndev);
 		if (es->enabled) {
 			adrv906x_switch_port_enable(es, other_port, false);
 			adrv906x_switch_port_enable(es, adrv906x_dev->port, false);
@@ -800,19 +802,32 @@ static int adrv906x_ndma_loopback_config(struct net_device *ndev, bool enable)
 	struct adrv906x_mac *mac = &adrv906x_dev->mac;
 	struct phy_device *phydev = ndev->phydev;
 
-	adrv906x_ndma_config_loopback(ndma_dev, enable);
+	if (enable) {
+		adrv906x_ndma_config_loopback(ndma_dev, enable);
 
-	/* When NDMA loopback is enabled, also enable PHY loopback to prevent
-	 * communication with the SerDes application. Additionally, block all NDMA
-	 * egress traffic by disabling the switch CPU port or the MAC data path,
-	 * depending on the current configuration.
-	 */
-	if (es->enabled)
-		adrv906x_switch_port_enable(es, SWITCH_CPU_PORT, !enable);
-	else
-		adrv906x_mac_set_path(mac, !enable);
+		/* When NDMA loopback is enabled, also enable PHY loopback to prevent
+		 * communication with the SerDes application. Additionally, block all NDMA
+		 * egress traffic by disabling the switch CPU port or the MAC data path,
+		 * depending on the current configuration.
+		 */
+		if (es->enabled)
+			adrv906x_switch_port_enable(es, SWITCH_CPU_PORT, !enable);
+		else
+			adrv906x_mac_set_path(mac, !enable);
 
-	phy_loopback(phydev, enable);
+		phy_loopback(phydev, enable);
+		adrv906x_ndma_open(adrv906x_dev->ndma_dev);
+	} else {
+		adrv906x_ndma_config_loopback(ndma_dev, enable);
+		adrv906x_ndma_close(adrv906x_dev->ndma_dev, ndev);
+
+		if (es->enabled)
+			adrv906x_switch_port_enable(es, SWITCH_CPU_PORT, !enable);
+		else
+			adrv906x_mac_set_path(mac, !enable);
+
+		phy_loopback(phydev, enable);
+	}
 
 	return 0;
 }

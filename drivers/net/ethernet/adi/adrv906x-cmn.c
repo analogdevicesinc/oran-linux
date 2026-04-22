@@ -78,27 +78,25 @@ void adrv906x_eth_cmn_pll_reset(struct net_device *ndev)
 	unsigned long timeout;
 	u32 val;
 
-	/* When switch is enabled, wait for both links to be down.
-	 * This ensures that no switch reconfiguration is in progress when we
-	 * reconfigure the PLL, avoiding issues that can occur if both are
-	 * updated at the same time.
+	/* Wait for both links to be down before PLL reset to ensure no
+	 * ethernet subsystem register accesses (reconfiguration, periodic
+	 * statistics collection, etc.) are in progress. Concurrent register
+	 * access can cause issues during PLL reconfiguration.
 	 *
-	 * Use a 1-second timeout to prevent indefinite blocking in case
-	 * the links don't go down as expected.
+	 * Use a 1-second timeout to prevent indefinite blocking.
 	 */
-	if (eth_if->ethswitch.enabled &&
-	    (eth_if->adrv906x_dev[0]->link_active ||
-	     eth_if->adrv906x_dev[1]->link_active)) {
+	if (READ_ONCE(eth_if->adrv906x_dev[0]->link_active) ||
+	    READ_ONCE(eth_if->adrv906x_dev[1]->link_active)) {
 		timeout = wait_for_completion_timeout(&eth_if->both_links_down,
 						      msecs_to_jiffies(1000));
 		if (timeout == 0)
 			netdev_warn(ndev, "timeout waiting for both links to go down");
 	}
 
-	/* Allow 1-2ms for switch hardware to complete in-flight operations
+	/* Allow 2-3ms for hardware to complete in-flight operations
 	 * before the PLL reset can safely proceed.
 	 */
-	usleep_range(1000, 2000);
+	usleep_range(2000, 3000);
 
 	mutex_lock(&eth_if->mtx);
 

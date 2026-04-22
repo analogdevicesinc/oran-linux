@@ -1048,6 +1048,33 @@ int adrv906x_serdes_lnk_down_req(struct phy_device *phydev)
 	return 0;
 }
 
+bool adrv906x_serdes_pll_locked(struct phy_device *phydev)
+{
+	struct adrv906x_serdes *serdes;
+	struct adrv906x_pll *pll;
+	int pll_state, dev_id;
+
+	if (!phydev)
+		return false;
+
+	dev_id = phydev->mdio.addr;
+	serdes = adrv906x_serdes_instance_get(dev_id);
+	if (!serdes)
+		return false;
+
+	pll = adrv906x_pll_instance_get(serdes->dev_id / 2);
+	if (!pll)
+		return false;
+
+	pll_state = atomic_read(&pll->fsm.state);
+	return (pll_state == PLL_ST_10G_RUN ||
+		pll_state == PLL_ST_25G_RUN ||
+		pll_state == PLL_ST_LNK0_10G_REQ ||
+		pll_state == PLL_ST_LNK1_10G_REQ ||
+		pll_state == PLL_ST_LNK0_25G_REQ ||
+		pll_state == PLL_ST_LNK1_25G_REQ);
+}
+
 static bool adrv906x_serdes_disabled(int dev_id)
 {
 	struct adrv906x_serdes *serdes = adrv906x_serdes_instance_get(dev_id);
@@ -1197,6 +1224,9 @@ static int adrv906x_pll_open(int dev_id)
 	struct adrv906x_pll *pll = adrv906x_pll_instance_get(dev_id);
 	int ret;
 
+	if (!pll)
+		return -EINVAL;
+
 	mutex_lock(&pll->mtx);
 	if (!pll->started) {
 		init_completion(&pll->fsm.comp_tran);
@@ -1232,6 +1262,9 @@ static int adrv906x_pll_open(int dev_id)
 static void adrv906x_pll_close(int dev_id)
 {
 	struct adrv906x_pll *pll = adrv906x_pll_instance_get(dev_id);
+
+	if (!pll)
+		return;
 
 	mutex_lock(&pll->mtx);
 	if (pll->started) {
