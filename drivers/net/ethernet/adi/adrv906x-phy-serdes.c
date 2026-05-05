@@ -898,7 +898,6 @@ static int __sd_deser_los_detected_recv(struct sk_buff *skb, struct genl_info *i
 	phydev = serdes->phydev;
 	serdes->rx_path_en(phydev, false);
 	phy_trigger_machine(phydev);
-
 	adrv906x_phy_fsm_trigger_transition(&serdes->fsm, SD_EVT_LOS_DETECTED);
 
 	return 0;
@@ -909,19 +908,10 @@ static void __sd_pwr_down(void *param)
 	struct adrv906x_phy_fsm *serdes_fsm = param;
 	struct adrv906x_serdes *serdes = container_of(serdes_fsm, struct adrv906x_serdes, fsm);
 	struct phy_device *phydev = serdes->phydev;
-	struct net_device *netdev = phydev->attached_dev;
 
 	serdes->rx_path_en(phydev, false);
 	serdes->tx_path_en(phydev, false);
 	phy_trigger_machine(phydev);
-
-	/* adrv906x_eth_cmn_ser_pwr_down(netdev);
-	 * This call was intentionally disabled because the serializer circuit can degrade
-	 * over time if powered down. As a workaround, we keep the serializer powered after
-	 * an administrative link-down event to reduce aging effects.
-	 */
-
-	adrv906x_eth_cmn_deser_pwr_down(netdev);
 }
 
 static void __sd_cfg_pll_req(void *param)
