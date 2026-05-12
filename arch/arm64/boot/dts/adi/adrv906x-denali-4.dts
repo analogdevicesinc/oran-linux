@@ -328,3 +328,60 @@
 		};
 	};
 };
+
+/ {
+	uio-adrv906x-interrupt-579 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-580 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-625 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-626 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-627 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-628 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-629 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-630 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-631 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-632 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-633 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-634 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-635 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-636 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-637 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-638 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-639 {
+		status = "disabled";
+	};
+	uio-adrv906x-interrupt-640 {
+		status = "disabled";
+	};
+};

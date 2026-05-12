@@ -1767,4 +1767,140 @@
 		compatible = "generic-uio";
 		interrupts = <GIC_SPI DYINGGASPDETECTION_POWERCONTROL IRQ_TYPE_LEVEL_HIGH>;
 	};
+	uio-adrv906x-interrupt-391 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_CAP_DONE_INTRPT IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-392 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_DONE_INTRPT IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-393 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_UL_ANT_CAL_CAP_DONE_INTRPT IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-394 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_UL_ANT_CAL_DDE_DONE_INTRPT IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-395 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_0 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-396 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_1 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-397 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_2 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-398 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_3 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-399 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_4 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-400 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_5 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-401 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_6 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-402 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_DL_ANT_CAL_DDE_ANT_DONE_INTRPT_7 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-403 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_UL_ANT_CAL_DDE_ANT_DONE_INTRPT_0 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-404 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_UL_ANT_CAL_DDE_ANT_DONE_INTRPT_1 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-405 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_UL_ANT_CAL_DDE_ANT_DONE_INTRPT_2 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-406 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI O_UL_ANT_CAL_DDE_ANT_DONE_INTRPT_3 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-579 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_161 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-580 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_162 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-625 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_207 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-626 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_208 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-627 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_209 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-628 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_210 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-629 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_211 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-630 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_212 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-631 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_213 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-632 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_214 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-633 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_215 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-634 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_216 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-635 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_217 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-636 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_218 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-637 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_219 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-638 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_220 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-639 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_221 IRQ_TYPE_LEVEL_HIGH>;
+	};
+	uio-adrv906x-interrupt-640 {
+		compatible = "generic-uio";
+		interrupts = <GIC_SPI C2C_OUT_HW_INTERRUPT_222 IRQ_TYPE_LEVEL_HIGH>;
+	};
 };
