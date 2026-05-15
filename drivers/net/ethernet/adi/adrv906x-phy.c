@@ -264,9 +264,6 @@ static int adrv906x_phy_read_status(struct phy_device *phydev)
 	 */
 	if (!adrv906x_serdes_pll_locked(phydev)) {
 		phydev->link = 0;
-		phydev->speed = SPEED_UNKNOWN;
-		phydev->duplex = DUPLEX_UNKNOWN;
-		phydev->interface = PHY_INTERFACE_MODE_NA;
 		return 0;
 	}
 
