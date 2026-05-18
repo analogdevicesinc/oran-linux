@@ -37,6 +37,7 @@
 		switch_port5:switch-port@5 {
 			id = <2>;
 			reg = <SEC_EMAC_SW_PORT_2_BASE 0x400>;
+			pvid = /bits/ 16 <1>;
 			mode = /bits/ 8 <3>;
 		};
 	};
