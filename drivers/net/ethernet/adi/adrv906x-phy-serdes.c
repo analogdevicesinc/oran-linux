@@ -1160,12 +1160,12 @@ static void __pll_cfg_10G_send(void *param)
 	struct net_device *netdev;
 	int ret;
 
-	/* Try to get the first serdes instance, fallback to second if NULL */
+	/* Select the serdes instance with 10G link speed */
 	serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
-	if (!serdes)
+	if (!serdes || serdes->speed != SPEED_10000)
 		serdes = adrv906x_serdes_instance_get(2 * pll->dev_id + 1);
 
-	if (!serdes) {
+	if (!serdes || serdes->speed != SPEED_10000) {
 		adrv906x_phy_fsm_trigger_transition(fsm, PLL_EVT_APP_INACT);
 		return;
 	}
@@ -1189,12 +1189,12 @@ static void __pll_cfg_25G_send(void *param)
 	struct net_device *netdev;
 	int ret;
 
-	/* Try to get the first serdes instance, fallback to second if NULL */
+	/* Select the serdes instance with 25G link speed */
 	serdes = adrv906x_serdes_instance_get(2 * pll->dev_id);
-	if (!serdes)
+	if (!serdes || serdes->speed != SPEED_25000)
 		serdes = adrv906x_serdes_instance_get(2 * pll->dev_id + 1);
 
-	if (!serdes) {
+	if (!serdes || serdes->speed != SPEED_25000) {
 		adrv906x_phy_fsm_trigger_transition(fsm, PLL_EVT_APP_INACT);
 		return;
 	}
