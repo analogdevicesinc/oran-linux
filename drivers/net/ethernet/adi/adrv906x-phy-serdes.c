@@ -16,6 +16,7 @@
 #include <linux/kfifo.h>
 #include <linux/atomic.h>
 #include "adrv906x-phy-serdes.h"
+#include "adrv906x-phy.h"
 #include "adrv906x-cmn.h"
 
 #define ADRV906X_GENL_NAME              "adrv906x"
@@ -959,6 +960,7 @@ static void __sd_ser_cfg_send(void *param)
 	struct net_device *netdev = phydev->attached_dev;
 	int ret;
 
+	adrv906x_phy_pcs_config_baser_mode(phydev);
 	adrv906x_eth_cmn_ser_pwr_up_and_reset(netdev);
 	ret = adrv906x_phy_send_message(NL_CMD_SER_CFG_REQ, serdes->dev_id, serdes->speed);
 	if (ret)

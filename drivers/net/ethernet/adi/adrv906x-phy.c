@@ -283,16 +283,8 @@ static int adrv906x_phy_read_status(struct phy_device *phydev)
 	}
 
 	val = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_CTRL2);
-	if ((val & ADRV906X_PCS_CTRL2_TYPE_SEL_MSK) == MDIO_PCS_CTRL2_10GBR) {
-		phydev->speed = SPEED_10000;
-		phydev->duplex = DUPLEX_FULL;
-		phydev->interface = PHY_INTERFACE_MODE_10GBASER;
-	} else if ((val & ADRV906X_PCS_CTRL2_TYPE_SEL_MSK) == ADRV906X_PCS_CTRL2_25GBR) {
-		phydev->speed = SPEED_25000;
-		phydev->duplex = DUPLEX_FULL;
-		phydev->interface = PHY_INTERFACE_MODE_25GBASER;
-	} else {
-		phydev->speed = SPEED_UNKNOWN;
+	if (FIELD_GET(ADRV906X_PCS_CTRL2_TYPE_SEL_MSK, val) != MDIO_PCS_CTRL2_10GBR &&
+	    FIELD_GET(ADRV906X_PCS_CTRL2_TYPE_SEL_MSK, val) != ADRV906X_PCS_CTRL2_25GBR) {
 		phydev->duplex = DUPLEX_UNKNOWN;
 		phydev->interface = PHY_INTERFACE_MODE_NA;
 	}
@@ -319,14 +311,14 @@ static int adrv906x_phy_set_loopback(struct phy_device *phydev, bool enable)
 	return 0;
 }
 
-static int adrv906x_phy_config_pcs_baser_mode(struct phy_device *phydev)
+void adrv906x_phy_pcs_config_baser_mode(struct phy_device *phydev)
 {
 	int ctrl1, ctrl2, cfg_tx, cfg_rx, gen_tx, gen_rx;
 
 	if (!adrv906x_phy_valid_speed(phydev->speed)) {
 		phydev_err(phydev,
 			   "unsupported speed: %d", phydev->speed);
-		return -EINVAL;
+		return;
 	}
 
 	ctrl2 = phy_read_mmd(phydev, MDIO_MMD_PCS, MDIO_CTRL2);
@@ -362,8 +354,6 @@ static int adrv906x_phy_config_pcs_baser_mode(struct phy_device *phydev)
 			      ADRV906X_PCS_RS_FEC_CTRL_EN);
 	else
 		phy_write_mmd(phydev, MDIO_MMD_PCS, ADRV906X_PCS_RS_FEC_CTRL_REG, 0);
-
-	return 0;
 }
 
 static int adrv906x_phy_config_aneg(struct phy_device *phydev)
@@ -385,10 +375,6 @@ static int adrv906x_phy_config_aneg(struct phy_device *phydev)
 		linkmode_set_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->advertising);
 	else
 		linkmode_clear_bit(ETHTOOL_LINK_MODE_FEC_RS_BIT, phydev->advertising);
-
-	ret = adrv906x_phy_config_pcs_baser_mode(phydev);
-	if (ret)
-		return ret;
 
 	if (!phydev->loopback_enabled) {
 		ret = adrv906x_serdes_lnk_up_req(phydev);

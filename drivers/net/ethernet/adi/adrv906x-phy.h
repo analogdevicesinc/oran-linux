@@ -104,5 +104,6 @@ void adrv906x_phy_unregister(void);
 
 void adrv906x_phy_get_fec_stats(struct net_device *dev, struct ethtool_fec_stats *fec_stats);
 void adrv906x_phy_pcs_reset_rx(struct phy_device *phydev);
+void adrv906x_phy_pcs_config_baser_mode(struct phy_device *phydev);
 
 #endif /* __ADRV906X_PHY_H__ */
