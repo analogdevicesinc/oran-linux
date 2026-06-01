@@ -191,7 +191,6 @@ struct adrv906x_ndma_dev {
 	struct adrv906x_ndma_chan tx_chan;
 	struct adrv906x_ndma_reset reset;
 	void __iomem *intr_ctrl;
-	struct delayed_work update_stats;
 	bool enabled;
 	struct kref refcount;
 	spinlock_t lock; /* protects struct and stats access */

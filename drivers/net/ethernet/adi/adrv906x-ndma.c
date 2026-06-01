@@ -987,16 +987,6 @@ void adrv906x_ndma_update_frame_drop_stats(struct adrv906x_ndma_dev *ndma_dev)
 	spin_unlock(&ndma_dev->lock);
 }
 
-static void adrv906x_ndma_stats_work(struct work_struct *work)
-{
-	struct adrv906x_ndma_dev *ndma_dev =
-		container_of(work, struct adrv906x_ndma_dev, update_stats.work);
-
-	adrv906x_ndma_update_frame_drop_stats(ndma_dev);
-
-	mod_delayed_work(system_long_wq, &ndma_dev->update_stats, msecs_to_jiffies(1000));
-}
-
 static void adrv906x_dma_tx_prep_desc_list(struct adrv906x_ndma_chan *ndma_ch)
 {
 	struct adrv906x_ndma_dev *ndma_dev = ndma_ch->parent;
@@ -1263,7 +1253,6 @@ static int adrv906x_ndma_device_init(struct adrv906x_ndma_dev *ndma_dev, struct 
 
 	INIT_WORK(&rx_chan->rx_flood_mitigate_work, adrv906x_ndma_rx_flood_evt_handler);
 	INIT_DELAYED_WORK(&tx_chan->tx_frames_timeout_work, adrv906x_ndma_tx_recovery_handler);
-	INIT_DELAYED_WORK(&ndma_dev->update_stats, adrv906x_ndma_stats_work);
 
 	return ret;
 }
@@ -1566,7 +1555,6 @@ void adrv906x_ndma_open(struct adrv906x_ndma_dev *ndma_dev)
 		kref_get(&ndma_dev->refcount);
 	}
 
-	mod_delayed_work(system_long_wq, &ndma_dev->update_stats, msecs_to_jiffies(1000));
 	spin_unlock_irqrestore(&ndma_dev->lock, flags0);
 
 	/* Add the net device MAC address to the MAC filter list */
@@ -1587,7 +1575,6 @@ static void adrv906x_ndma_stop(struct kref *ref)
 
 	spin_lock_irqsave(&ndma_dev->lock, flags);
 	adrv906x_ndma_disable_all_irqs(ndma_dev);
-	cancel_delayed_work(&ndma_dev->update_stats);
 	spin_unlock_irqrestore(&ndma_dev->lock, flags);
 
 	/* Disable ndma RX channel */
@@ -2448,7 +2435,6 @@ void adrv906x_ndma_remove(struct adrv906x_ndma_dev *ndma_dev)
 	adrv906x_ndma_clear_mac_table(ndma_dev);
 	sysfs_remove_group(&ndma_dev->dev->kobj, &ndma_dev->attr_group);
 	cancel_delayed_work_sync(&tx_chan->tx_frames_timeout_work);
-	cancel_delayed_work_sync(&ndma_dev->update_stats);
 	cancel_work_sync(&rx_chan->rx_flood_mitigate_work);
 	if (ndma_dev->wq)
 		destroy_workqueue(ndma_dev->wq);

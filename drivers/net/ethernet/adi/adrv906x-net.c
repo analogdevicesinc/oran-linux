@@ -20,6 +20,7 @@
 #include <linux/if_vlan.h>
 #include <linux/string.h>
 #include <linux/bitfield.h>
+#include <linux/rtnetlink.h>
 #include "adrv906x-ndma.h"
 #include "adrv906x-macsec-ext.h"
 #include "adrv906x-mac.h"
@@ -85,35 +86,6 @@ static void adrv906x_eth_cdr_get_recovered_clk_divs(struct device_node *np,
 		eth_if->recovered_clk_div_25g = val;
 	}
 }
-
-static ssize_t adrv906x_pcs_link_drop_cnt_store(struct device *dev,
-						struct device_attribute *attr,
-						const char *buf, size_t cnt)
-{
-	struct adrv906x_eth_if *adrv906x_eth;
-
-	adrv906x_eth = dev_get_drvdata(dev);
-	adrv906x_cmn_pcs_link_drop_cnt_clear(adrv906x_eth);
-	return cnt;
-}
-
-static ssize_t adrv906x_pcs_link_drop_cnt_show(struct device *dev,
-					       struct device_attribute *attr, char *buf)
-{
-	struct adrv906x_eth_if *adrv906x_eth;
-
-	adrv906x_eth = dev_get_drvdata(dev);
-	return adrv906x_cmn_pcs_link_drop_cnt_get(adrv906x_eth, buf);
-}
-
-static DEVICE_ATTR_RW(adrv906x_pcs_link_drop_cnt);
-
-static struct attribute *adrv906x_eth_debug_attrs[] = {
-	&dev_attr_adrv906x_pcs_link_drop_cnt.attr,
-	NULL,
-};
-
-ATTRIBUTE_GROUPS(adrv906x_eth_debug);
 
 static ssize_t recovered_clock_output_show(struct device *dev,
 					   struct device_attribute *attr, char *buf)
@@ -934,6 +906,29 @@ static int adrv906x_eth_dev_reg(struct platform_device *pdev, struct device_node
 	return 0;
 }
 
+static void adrv906x_eth_stats_work(struct work_struct *work)
+{
+	struct adrv906x_eth_if *eth_if =
+		container_of(work, struct adrv906x_eth_if, update_stats.work);
+	int i;
+
+	for (i = 0; i < MAX_NETDEV_NUM; i++) {
+		struct adrv906x_eth_dev *dev = eth_if->adrv906x_dev[i];
+
+		if (!dev)
+			continue;
+		adrv906x_mac_update_hw_stats(&dev->mac, false);
+		adrv906x_ndma_update_frame_drop_stats(dev->ndma_dev);
+	}
+
+	if (eth_if->ethswitch.enabled)
+		adrv906x_switch_update_hw_stats(&eth_if->ethswitch);
+
+	adrv906x_cmn_pcs_link_drop_cnt_read(eth_if);
+
+	mod_delayed_work(system_long_wq, &eth_if->update_stats, msecs_to_jiffies(1000));
+}
+
 static int adrv906x_eth_probe(struct platform_device *pdev)
 {
 	struct net_device *ndev;
@@ -1190,9 +1185,8 @@ no_macsec:
 
 	platform_set_drvdata(pdev, eth_if);
 
-	ret = sysfs_create_group(&pdev->dev.kobj, *adrv906x_eth_debug_groups);
-	if (ret)
-		goto error_delete_groups;
+	INIT_DELAYED_WORK(&eth_if->update_stats, adrv906x_eth_stats_work);
+	mod_delayed_work(system_long_wq, &eth_if->update_stats, msecs_to_jiffies(1000));
 
 	return 0;
 
@@ -1200,8 +1194,6 @@ error_delete_cdr_div_out_enable_sysfs:
 	device_remove_file(&eth_if->adrv906x_dev[i]->ndev->dev,
 			   &dev_attr_recovered_clock_output);
 	dev_set_drvdata(&eth_if->adrv906x_dev[i]->ndev->dev, NULL);
-error_delete_groups:
-	sysfs_remove_groups(&pdev->dev.kobj, adrv906x_eth_debug_groups);
 	if (eth_if->ethswitch.enabled)
 		adrv906x_switch_unregister_attr(&eth_if->ethswitch);
 error_unregister_netdev:
@@ -1231,8 +1223,8 @@ static void adrv906x_eth_remove(struct platform_device *pdev)
 	struct net_device *ndev;
 	int i;
 
+	cancel_delayed_work_sync(&eth_if->update_stats);
 	mutex_destroy(&eth_if->mtx);
-	sysfs_remove_groups(&pdev->dev.kobj, adrv906x_eth_debug_groups);
 	if (es->enabled)
 		adrv906x_switch_unregister_attr(&eth_if->ethswitch);
 

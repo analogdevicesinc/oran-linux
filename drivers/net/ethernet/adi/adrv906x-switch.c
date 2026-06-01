@@ -879,16 +879,6 @@ void adrv906x_switch_update_hw_stats(struct adrv906x_eth_switch *es)
 	mutex_unlock(&es->lock);
 }
 
-static void adrv906x_switch_stats_work(struct work_struct *work)
-{
-	struct adrv906x_eth_switch *es = container_of(work, struct adrv906x_eth_switch,
-						      update_stats.work);
-
-	adrv906x_switch_update_hw_stats(es);
-
-	mod_delayed_work(system_long_wq, &es->update_stats, msecs_to_jiffies(1000));
-}
-
 int adrv906x_switch_port_enable(struct adrv906x_eth_switch *es, int portid, bool enabled)
 {
 	if (portid >= SWITCH_MAX_PORT_NUM)
@@ -1070,7 +1060,6 @@ void adrv906x_switch_cleanup(struct adrv906x_eth_switch *es)
 		kthread_stop(es->recovery_task);
 		es->recovery_task = NULL;
 	}
-	cancel_delayed_work_sync(&es->update_stats);
 }
 
 static int adrv906x_switch_vlan_membership_recovery(struct adrv906x_eth_switch *es)
@@ -1200,9 +1189,6 @@ int adrv906x_switch_init(struct adrv906x_eth_switch *es)
 			return ret;
 		}
 	}
-
-	INIT_DELAYED_WORK(&es->update_stats, adrv906x_switch_stats_work);
-	mod_delayed_work(system_long_wq, &es->update_stats, msecs_to_jiffies(1000));
 
 	init_waitqueue_head(&es->recovery_wq);
 	atomic_set(&es->error_pending, 0);

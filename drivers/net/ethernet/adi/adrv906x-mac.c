@@ -212,15 +212,6 @@ void adrv906x_mac_update_hw_stats(struct adrv906x_mac *mac, bool force)
 	mutex_unlock(&mac->stats_lock);
 }
 
-static void adrv906x_mac_stats_work(struct work_struct *work)
-{
-	struct adrv906x_mac *mac = container_of(work, struct adrv906x_mac, update_stats.work);
-
-	adrv906x_mac_update_hw_stats(mac, false);
-
-	mod_delayed_work(system_long_wq, &mac->update_stats, msecs_to_jiffies(1000));
-}
-
 bool adrv906x_mac_link_stable(struct adrv906x_mac *mac)
 {
 	bool prev_stable = false;
@@ -248,7 +239,6 @@ bool adrv906x_mac_link_stable(struct adrv906x_mac *mac)
 
 void adrv906x_mac_cleanup(struct adrv906x_mac *mac)
 {
-	cancel_delayed_work_sync(&mac->update_stats);
 	mutex_destroy(&mac->stats_lock);
 }
 
@@ -264,8 +254,6 @@ int adrv906x_mac_init(struct adrv906x_mac *mac, u32 size)
 	adrv906x_mac_rx_path_dis(mac);
 
 	mutex_init(&mac->stats_lock);
-	INIT_DELAYED_WORK(&mac->update_stats, adrv906x_mac_stats_work);
-	mod_delayed_work(system_long_wq, &mac->update_stats, msecs_to_jiffies(1000));
 
 	return 0;
 }

@@ -184,7 +184,6 @@ struct adrv906x_eth_switch {
 	struct switch_isr_args isr_pre_args;
 	struct switch_isr_args isr_post_args;
 	struct switch_port_stats port_stats[SWITCH_MAX_PORT_NUM];
-	struct delayed_work update_stats;
 	bool trap_ptp_fwd_en;
 	wait_queue_head_t recovery_wq;
 	atomic_t error_pending;

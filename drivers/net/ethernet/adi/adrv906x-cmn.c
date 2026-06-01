@@ -307,39 +307,35 @@ void adrv906x_eth_cmn_init(void __iomem *regs, bool switch_enabled, bool macsec_
 	adrv906x_eth_cmn_serdes_4pack_reset(regs);
 }
 
-void adrv906x_cmn_pcs_link_drop_cnt_clear(struct adrv906x_eth_if *adrv906x_eth)
+void adrv906x_cmn_pcs_link_drop_cnt_read(struct adrv906x_eth_if *eth_if)
 {
-	void __iomem *regs;
+	void __iomem *regs = eth_if->emac_cmn_regs;
 	u32 val;
 
-	regs = adrv906x_eth->emac_cmn_regs;
+	mutex_lock(&eth_if->mtx);
 
-	mutex_lock(&adrv906x_eth->mtx);
-	val = ioread32(regs + EMAC_CMN_DIGITAL_CTRL4);
-	val |= EMAC_CMN_CLEAR_PCS_STATUS_NE_CNT;
-	iowrite32(val, regs + EMAC_CMN_DIGITAL_CTRL4);
-	val &= ~EMAC_CMN_CLEAR_PCS_STATUS_NE_CNT;
-	iowrite32(val, regs + EMAC_CMN_DIGITAL_CTRL4);
-	mutex_unlock(&adrv906x_eth->mtx);
-}
-
-ssize_t adrv906x_cmn_pcs_link_drop_cnt_get(struct adrv906x_eth_if *adrv906x_eth, char *buf)
-{
-	void __iomem *regs;
-	u8 cnt0, cnt1;
-	unsigned long offset;
-	u32 val;
-
-	regs = adrv906x_eth->emac_cmn_regs;
+	if (!(eth_if->adrv906x_dev[0] && READ_ONCE(eth_if->adrv906x_dev[0]->link_active)) &&
+	    !(eth_if->adrv906x_dev[1] && READ_ONCE(eth_if->adrv906x_dev[1]->link_active))) {
+		mutex_unlock(&eth_if->mtx);
+		return;
+	}
 
 	val = ioread32(regs + EMAC_CMN_DIGITAL_CTRL4);
-	cnt0 = FIELD_GET(EMAC_CMN_PCS_STATUS_NE_CNT_0, val);
-	cnt1 = FIELD_GET(EMAC_CMN_PCS_STATUS_NE_CNT_1, val);
 
-	offset = sprintf(buf, "port 0 link failures: %d\n", cnt0);
-	offset += sprintf(buf + offset, "port 1 link failures: %d\n", cnt1);
+	if (eth_if->adrv906x_dev[0])
+		eth_if->adrv906x_dev[0]->pcs_link_drop_cnt +=
+			FIELD_GET(EMAC_CMN_PCS_STATUS_NE_CNT_0, val);
+	if (eth_if->adrv906x_dev[1])
+		eth_if->adrv906x_dev[1]->pcs_link_drop_cnt +=
+			FIELD_GET(EMAC_CMN_PCS_STATUS_NE_CNT_1, val);
 
-	return offset;
+	if (val & (EMAC_CMN_PCS_STATUS_NE_CNT_0 | EMAC_CMN_PCS_STATUS_NE_CNT_1)) {
+		val |= EMAC_CMN_CLEAR_PCS_STATUS_NE_CNT;
+		iowrite32(val, regs + EMAC_CMN_DIGITAL_CTRL4);
+		val &= ~EMAC_CMN_CLEAR_PCS_STATUS_NE_CNT;
+		iowrite32(val, regs + EMAC_CMN_DIGITAL_CTRL4);
+	}
+	mutex_unlock(&eth_if->mtx);
 }
 
 ssize_t adrv906x_cmn_recovered_clock_output_get(struct device *dev, char *buf)

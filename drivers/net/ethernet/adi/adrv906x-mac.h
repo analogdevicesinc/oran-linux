@@ -107,7 +107,6 @@ struct adrv906x_mac {
 	void __iomem *emac_rx;
 	struct adrv906x_mac_tx_stats hw_stats_tx;
 	struct adrv906x_mac_rx_stats hw_stats_rx;
-	struct delayed_work update_stats;
 	struct mutex stats_lock; /* protects hw stats access and updates */
 };
 

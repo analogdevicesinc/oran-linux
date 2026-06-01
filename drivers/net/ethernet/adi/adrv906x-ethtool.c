@@ -203,6 +203,7 @@ static const char adrv906x_gstrings_stats_names[][ETH_GSTRING_LEN] = {
 	"switch_port2_bcast_pkt_tx",
 	"switch_port2_bcast_bytes_tx",
 	"switch_port2_crd_buffer_drop",
+	"pcs_link_drop_cnt",
 };
 
 static const char adrv906x_gstrings_selftest_names[][ETH_GSTRING_LEN] = {
@@ -368,6 +369,7 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 	adrv906x_mac_update_hw_stats(&adrv906x_dev->mac, false);
 	adrv906x_switch_update_hw_stats(es);
 	adrv906x_ndma_update_frame_drop_stats(adrv906x_dev->ndma_dev);
+	adrv906x_cmn_pcs_link_drop_cnt_read(eth_if);
 
 	/* Read MAC stats under lock to prevent race with delayed work */
 	mutex_lock(&adrv906x_dev->mac.stats_lock);
@@ -488,6 +490,10 @@ static void adrv906x_ethtool_get_stats(struct net_device *ndev, struct ethtool_s
 		data[base_idx + 31] = es->port_stats[i].crd_buffer_drop;
 	}
 	mutex_unlock(&es->lock);
+
+	mutex_lock(&eth_if->mtx);
+	data[ADRV906X_NUM_STATS - 1] = adrv906x_dev->pcs_link_drop_cnt;
+	mutex_unlock(&eth_if->mtx);
 }
 
 static const struct ethtool_rmon_hist_range adrv906x_ethtool_rmon_ranges[] = {
