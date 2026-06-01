@@ -15,6 +15,7 @@
 #include <linux/spinlock.h>
 #include <linux/kfifo.h>
 #include <linux/atomic.h>
+#include <linux/rtnetlink.h>
 #include "adrv906x-phy-serdes.h"
 #include "adrv906x-phy.h"
 #include "adrv906x-cmn.h"
@@ -29,6 +30,7 @@
 #define ADRV906X_PHY_APP_START_IND_MSK  BIT(15)
 
 #define APP_HEARTBEAT_TIMEOUT_MS        10000
+#define PLL_LOCK_TIMEOUT_MS             100
 
 typedef void (*adrv906x_phy_fsm_action)(void *param);
 typedef char * (*adrv906x_phy_fsm_state_to_str)(u32 state);
@@ -152,6 +154,7 @@ struct adrv906x_serdes {
 struct adrv906x_pll {
 	struct adrv906x_phy_fsm fsm;
 	struct mutex mtx; /* protects struct access */
+	struct completion locked;
 	int dev_id;
 	bool started;
 };
@@ -647,6 +650,7 @@ static int __pll_cfg_done_recv(struct sk_buff *skb, struct genl_info *info)
 
 	pll = adrv906x_pll_instance_get(dev_id);
 	adrv906x_phy_fsm_trigger_transition(&pll->fsm, PLL_EVT_CFG_DONE);
+	complete(&pll->locked);
 
 	return 0;
 }
@@ -1160,6 +1164,7 @@ static void __pll_cfg_10G_send(void *param)
 	struct adrv906x_serdes *serdes;
 	struct phy_device *phydev;
 	struct net_device *netdev;
+	unsigned long timeout;
 	int ret;
 
 	/* Select the serdes instance with 10G link speed */
@@ -1175,11 +1180,28 @@ static void __pll_cfg_10G_send(void *param)
 	phydev = serdes->phydev;
 	netdev = phydev->attached_dev;
 
+	/* Prevent concurrent register access from userspace (ethtool, netdev
+	 * ops) while PLL is being reconfigured. Hold rtnl_lock until the
+	 * serdes app confirms PLL is locked.
+	 */
+	reinit_completion(&pll->locked);
+	rtnl_lock();
+
 	adrv906x_eth_cmn_pll_reset(netdev);
 	adrv906x_eth_cmn_mode_cfg(netdev);
 	ret = adrv906x_phy_send_message(NL_CMD_PLL_CFG_REQ, pll->dev_id, SPEED_10000);
-	if (ret)
+	if (ret) {
+		rtnl_unlock();
 		adrv906x_phy_fsm_trigger_transition(fsm, PLL_EVT_APP_INACT);
+		return;
+	}
+
+	timeout = wait_for_completion_timeout(&pll->locked,
+					      msecs_to_jiffies(PLL_LOCK_TIMEOUT_MS));
+	rtnl_unlock();
+
+	if (timeout == 0)
+		pr_warn("[adrv906x] timeout waiting for PLL lock confirmation");
 }
 
 static void __pll_cfg_25G_send(void *param)
@@ -1189,6 +1211,7 @@ static void __pll_cfg_25G_send(void *param)
 	struct adrv906x_serdes *serdes;
 	struct phy_device *phydev;
 	struct net_device *netdev;
+	unsigned long timeout;
 	int ret;
 
 	/* Select the serdes instance with 25G link speed */
@@ -1204,11 +1227,28 @@ static void __pll_cfg_25G_send(void *param)
 	phydev = serdes->phydev;
 	netdev = phydev->attached_dev;
 
+	/* Prevent concurrent register access from userspace (ethtool, netdev
+	 * ops) while PLL is being reconfigured. Hold rtnl_lock until the
+	 * serdes app confirms PLL is locked.
+	 */
+	reinit_completion(&pll->locked);
+	rtnl_lock();
+
 	adrv906x_eth_cmn_pll_reset(netdev);
 	adrv906x_eth_cmn_mode_cfg(netdev);
 	ret = adrv906x_phy_send_message(NL_CMD_PLL_CFG_REQ, pll->dev_id, SPEED_25000);
-	if (ret)
+	if (ret) {
+		rtnl_unlock();
 		adrv906x_phy_fsm_trigger_transition(fsm, PLL_EVT_APP_INACT);
+		return;
+	}
+
+	timeout = wait_for_completion_timeout(&pll->locked,
+					      msecs_to_jiffies(PLL_LOCK_TIMEOUT_MS));
+	rtnl_unlock();
+
+	if (timeout == 0)
+		pr_warn("[adrv906x] timeout waiting for PLL lock confirmation");
 }
 
 static int adrv906x_pll_open(int dev_id)
@@ -1221,6 +1261,7 @@ static int adrv906x_pll_open(int dev_id)
 
 	mutex_lock(&pll->mtx);
 	if (!pll->started) {
+		init_completion(&pll->locked);
 		init_completion(&pll->fsm.comp_tran);
 		spin_lock_init(&pll->fsm.event_fifo_lock);
 		ret = kfifo_alloc(&pll->fsm.event_fifo, 32, GFP_KERNEL);
