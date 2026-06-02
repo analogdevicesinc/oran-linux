@@ -90,14 +90,26 @@ static void adrv906x_eth_cdr_get_recovered_clk_divs(struct device_node *np,
 static ssize_t recovered_clock_output_show(struct device *dev,
 					   struct device_attribute *attr, char *buf)
 {
-	return adrv906x_cmn_recovered_clock_output_get(dev, buf);
+	ssize_t ret;
+
+	rtnl_lock();
+	ret = adrv906x_cmn_recovered_clock_output_get(dev, buf);
+	rtnl_unlock();
+
+	return ret;
 }
 
 static ssize_t recovered_clock_output_store(struct device *dev,
 					    struct device_attribute *attr,
 					    const char *buf, size_t cnt)
 {
-	return adrv906x_cmn_recovered_clock_output_set(dev, buf, cnt);
+	ssize_t ret;
+
+	rtnl_lock();
+	ret = adrv906x_cmn_recovered_clock_output_set(dev, buf, cnt);
+	rtnl_unlock();
+
+	return ret;
 }
 
 static DEVICE_ATTR_RW(recovered_clock_output);
