@@ -30,7 +30,7 @@
 #define ADRV906X_PHY_APP_START_IND_MSK  BIT(15)
 
 #define APP_HEARTBEAT_TIMEOUT_MS        10000
-#define PLL_LOCK_TIMEOUT_MS             100
+#define PLL_LOCK_TIMEOUT_MS             5000
 
 typedef void (*adrv906x_phy_fsm_action)(void *param);
 typedef char * (*adrv906x_phy_fsm_state_to_str)(u32 state);
