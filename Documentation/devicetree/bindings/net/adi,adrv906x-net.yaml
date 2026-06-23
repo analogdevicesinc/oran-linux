@@ -257,10 +257,11 @@ patternProperties:
         type: boolean
 
     patternProperties:
-      "^switch-port@[0-2]+$":
+      "^switch-port@[0-5]+$":
         type: object
         description: A child node for each physical port on the built-in switch.
-                     Must be in numerical order!
+                     The unit address is an arbitrary unique index; the logical
+                     port is identified by the 'id' property.
         properties:
           id:
             $ref: /schemas/types.yaml#/definitions/uint32
@@ -270,10 +271,14 @@ patternProperties:
             description: Physical base address for the specific switch port.
           pvid:
             $ref: /schemas/types.yaml#/definitions/uint16
-            description: Default primary VLAN IDs (1–4094) for the specific switch port.
+            description: Primary VLAN ID (1-4094) for the switch port. Defaults to 1
+                         if not specified. Not applicable to the CPU port (id=2)
+                         where VLAN filtering is permanently disabled.
           mode:
             $ref: /schemas/types.yaml#/definitions/uint8
             description: VLAN mode (Acceptable frame type) - access(0), trunk(1), accept all(3)
+                         Defaults to accept all(3) if not specified. Not applicable to
+                         the CPU port (id=2) where VLAN filtering is permanently disabled.
         additionalProperties: false
     additionalProperties: false
 
@@ -427,8 +432,6 @@ examples:
         switch_port2:switch-port@2 {
           id = <2>;
           reg = <EMAC_SW_PORT_2_BASE 0x400>;
-          pvid = /bits/ 16 <1>;
-          mode = /bits/ 8 <3>;
         };
       };
     };
