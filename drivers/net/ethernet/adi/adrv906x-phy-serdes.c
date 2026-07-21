@@ -841,9 +841,10 @@ static int __sd_deser_signal_ok_recv(struct sk_buff *skb, struct genl_info *info
 
 	/* Reset PCS RX/TX data path */
 	serdes->rx_path_en(phydev, false);
-	serdes->rx_path_en(phydev, true);
 	serdes->tx_path_en(phydev, false);
 	serdes->tx_path_en(phydev, true);
+	usleep_range(1000, 2000);
+	serdes->rx_path_en(phydev, true);
 
 	adrv906x_phy_fsm_trigger_transition(&serdes->fsm, SD_EVT_SIGNAL_OK);
 
