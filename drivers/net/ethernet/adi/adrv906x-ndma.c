@@ -1030,7 +1030,7 @@ static void adrv906x_ndma_reset_tx(struct adrv906x_ndma_dev *ndma_dev)
 	spin_unlock_irqrestore(&ndma_reset_lock, flags);
 }
 
-static void adrv906x_ndma_reset_rx(struct adrv906x_ndma_dev *ndma_dev)
+static void __maybe_unused adrv906x_ndma_reset_rx(struct adrv906x_ndma_dev *ndma_dev)
 {
 	struct adrv906x_ndma_reset *reset = &ndma_dev->reset;
 	unsigned long flags;
@@ -1295,8 +1295,6 @@ static void adrv906x_ndma_reset(struct adrv906x_ndma_dev *ndma_dev)
 	tx_chan->ptp_seq_num = NDMA_TX_PTP_MIN_SEQNUM;
 
 	spin_unlock_irqrestore(&tx_chan->lock, flags);
-
-	adrv906x_ndma_reset_rx(ndma_dev);
 
 	spin_lock_irqsave(&rx_chan->lock, flags);
 	rx_chan->exp_seq_num = 0;

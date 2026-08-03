@@ -263,7 +263,6 @@ static void adrv906x_net_link_down(struct phylink_config *config, unsigned int m
 	if (READ_ONCE(adrv906x_dev->link_active)) {
 		netif_stop_queue(ndev);
 		adrv906x_mac_set_path(mac, false);
-		adrv906x_ndma_close(adrv906x_dev->ndma_dev, ndev);
 
 		WRITE_ONCE(adrv906x_dev->link_active, false);
 		/* Check if both front-haul ports are now down */
@@ -309,8 +308,6 @@ static void adrv906x_net_link_up(struct phylink_config *config,
 	 * link_up callbacks without matching link_down calls.
 	 */
 	if (!READ_ONCE(adrv906x_dev->link_active)) {
-		adrv906x_ndma_open(adrv906x_dev->ndma_dev);
-
 		/* Check if this is the first link coming up */
 		if (!READ_ONCE(eth_if->adrv906x_dev[0]->link_active) &&
 		    !READ_ONCE(eth_if->adrv906x_dev[1]->link_active))
@@ -581,31 +578,32 @@ err:
 	return -1;
 }
 
-static int adrv906x_eth_oran_if_tx_dis(struct adrv906x_oran_if *oif)
+static void adrv906x_eth_oran_if_rx_set_en(struct adrv906x_oran_if *oif, bool enable)
+{
+	u32 val;
+
+	if (oif->oif_rx) {
+		val = ioread32(oif->oif_rx);
+		if (enable)
+			val |= OIF_RX_CTRL_EN;
+		else
+			val &= ~OIF_RX_CTRL_EN;
+		iowrite32(val, oif->oif_rx);
+	}
+}
+
+static void adrv906x_eth_oran_if_tx_set_en(struct adrv906x_oran_if *oif, bool enable)
 {
 	u32 val;
 
 	if (oif->oif_tx) {
-		val = ioread32(oif->oif_tx) & ~OIF_CFG_TX_EN;
-		iowrite32(val, oif->oif_tx);
-	}
-	return 0;
-}
-
-static int adrv906x_eth_oran_if_en(struct adrv906x_oran_if *oif)
-{
-	u32 val;
-
-	if (oif->oif_rx && oif->oif_tx) {
-		val = ioread32(oif->oif_rx);
-		val |= OIF_RX_CTRL_EN;
-		iowrite32(val, oif->oif_rx);
-
 		val = ioread32(oif->oif_tx);
-		val |= (OIF_CFG_TX_EN | OIF_CFG_TX_IPG_VAL);
+		if (enable)
+			val |= (OIF_CFG_TX_EN | OIF_CFG_TX_IPG_VAL);
+		else
+			val &= ~OIF_CFG_TX_EN;
 		iowrite32(val, oif->oif_tx);
 	}
-	return 0;
 }
 
 static int adrv906x_eth_ioctl(struct net_device *ndev, struct ifreq *ifr, int cmd)
@@ -631,35 +629,35 @@ static int adrv906x_eth_ioctl(struct net_device *ndev, struct ifreq *ifr, int cm
 static int adrv906x_eth_switch_reset_soft_pre(void *arg)
 {
 	struct adrv906x_eth_if *eth_if = (struct adrv906x_eth_if *)arg;
-	int ret;
 	int i;
 
 	for (i = 0; i < MAX_NETDEV_NUM; i++)
 		adrv906x_mac_rx_path_dis(&eth_if->adrv906x_dev[i]->mac);
 
-	ret = adrv906x_eth_oran_if_tx_dis(&eth_if->adrv906x_dev[1]->oif);
+	adrv906x_eth_oran_if_tx_set_en(&eth_if->adrv906x_dev[1]->oif, false);
 
-	return ret;
+	return 0;
 }
 
 static int adrv906x_eth_switch_reset_soft_post(void *arg)
 {
 	struct adrv906x_eth_if *eth_if = (struct adrv906x_eth_if *)arg;
-	int ret;
 	int i;
 
-	ret = adrv906x_eth_oran_if_en(&eth_if->adrv906x_dev[1]->oif);
+	adrv906x_eth_oran_if_tx_set_en(&eth_if->adrv906x_dev[1]->oif, true);
 	for (i = 0; i < MAX_NETDEV_NUM; i++)
 		adrv906x_mac_rx_path_en(&eth_if->adrv906x_dev[i]->mac);
 
-	return ret;
+	return 0;
 }
 
 static int adrv906x_eth_open(struct net_device *ndev)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
 
-	adrv906x_eth_oran_if_en(&adrv906x_dev->oif);
+	adrv906x_ndma_open(adrv906x_dev->ndma_dev);
+	adrv906x_eth_oran_if_rx_set_en(&adrv906x_dev->oif, true);
+	adrv906x_eth_oran_if_tx_set_en(&adrv906x_dev->oif, true);
 	phylink_start(adrv906x_dev->phylink);
 
 #if IS_ENABLED(CONFIG_MACSEC)
@@ -676,8 +674,15 @@ static int adrv906x_eth_open(struct net_device *ndev)
 static int adrv906x_eth_stop(struct net_device *ndev)
 {
 	struct adrv906x_eth_dev *adrv906x_dev = netdev_priv(ndev);
+	struct adrv906x_eth_if *eth_if = adrv906x_dev->parent;
+	int other_port = (adrv906x_dev->port + 1) % MAX_NETDEV_NUM;
+	struct net_device *other_ndev = eth_if->adrv906x_dev[other_port]->ndev;
 
+	if (!eth_if->ethswitch.enabled || !netif_running(other_ndev))
+		adrv906x_eth_oran_if_rx_set_en(&adrv906x_dev->oif, false);
 	netif_stop_queue(ndev);
+	usleep_range(10000, 10100);
+	adrv906x_ndma_close(adrv906x_dev->ndma_dev, ndev);
 	phylink_stop(adrv906x_dev->phylink);
 
 	return 0;
@@ -1167,10 +1172,8 @@ no_macsec:
 		if (ret)
 			goto error_unregister_netdev;
 
-		if (oran_if_np) {
+		if (oran_if_np)
 			adrv906x_get_oran_if_reg_addr(adrv906x_dev, oran_if_np);
-			adrv906x_eth_oran_if_en(&adrv906x_dev->oif);
-		}
 
 		spin_lock_init(&adrv906x_dev->lock);
 	}
